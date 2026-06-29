@@ -17,7 +17,7 @@ setup(
     long_description_content_type='text/markdown',
     name='helmpy',
     # version='0.1.0' + 'rc' + TIMESTAMP,
-    version='0.1.1',
+    version='0.1.2',
     url='https://github.com/HELMpy/HELMpy',
     description='HELMpy is an open source package of power flow solvers, including the Holomorphic Embedding Load Flow Method (HELM).',
     packages=find_packages(
