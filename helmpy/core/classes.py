@@ -188,7 +188,10 @@ class CaseData:
         self.N_branches = np.int64(0)  # Initialize with a default value
         self.slack_bus = np.int64(0)    # Initialize with a default value
         self.slack = np.int64(0)         # Initialize with a default value
-        self.Number_bus = np.zeros(N, dtype=np.int64)  # Use an array instead of a dict
+        # Maps external bus number (0-based) to internal index. Must be a dict:
+        # external numbering may be non-consecutive (e.g. the pegase cases), so an
+        # array of size N cannot hold it.
+        self.Number_bus = dict()
         # dtype must be wide enough for 'Slack'/'PVLIM'; a plain np.array(['PQ']*N)
         # would be '<U2' and silently truncate longer type strings.
         self.Buses_type = np.array(['PQ'] * N, dtype='<U5')  # Use an array for types
@@ -209,7 +212,10 @@ class CaseData:
         self.branches_buses = [[i] for i in range(N)]  # Convert list of lists to a 2D array
         self.Ybr_list = []  # List of [from_bus, to_bus, 2x2 complex Ybr] triples
         self.phase_barras = np.full(N, False)
-        self.phase_dict = np.zeros(N, dtype=np.int64)  # Use an array instead of a dict
+        # Maps bus index -> [[neighbor buses], [admittance corrections]] for buses
+        # connected to phase-shifting transformers. Entries are ragged lists, so this
+        # must stay a dict (an int array silently breaks assignment of the lists).
+        self.phase_dict = dict()
 
         # case parameters
         self.scale = 1.0
