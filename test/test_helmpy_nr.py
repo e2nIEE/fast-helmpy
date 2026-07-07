@@ -54,7 +54,9 @@ def algorithm_str(DSB_model, aply_DSB_model):
     return algorithm
 
 
-def test_helmpy_nr_functions(detailed_print, cases_to_test, methods): 
+# Not named test_* on purpose: this is a manual script (run via __main__), not a
+# pytest case; pytest would otherwise try to collect it and fail on the arguments.
+def run_helmpy_nr_functions(detailed_print, cases_to_test, methods):
     # Add all the error here for a final and fast check
     total_errors = []
     print("\n  ###############################")
@@ -153,4 +155,4 @@ if __name__ == '__main__':
             case2869pegase,
     ]
 
-    test_helmpy_nr_functions(detailed_print, cases_to_test, methods)
+    run_helmpy_nr_functions(detailed_print, cases_to_test, methods)

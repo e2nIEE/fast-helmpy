@@ -106,3 +106,6 @@ venv.bak/
 # vscode
 .vscode
 .idea/
+
+# reference papers (kept locally, not distributed with the repo)
+papers/
