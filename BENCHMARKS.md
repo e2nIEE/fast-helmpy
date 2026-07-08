@@ -64,3 +64,37 @@ final pass resumes and only verifies), and small grids see a slight overhead
 Solution deviation is bounded by the convergence tolerance, not bit-identical:
 stopping points changed (check cadence, resume). Test gates relaxed
 accordingly (1e-7 p.u. / 5e-6 deg, >10× headroom over observed).
+
+## Phase 2 — vectorized recurrence (2026-07-08)
+
+Changes: the per-bus Python loops of the coefficient recurrence are replaced
+by whole-bus-axis array operations — neighbor sums are sparse mat-vecs
+(`Ytrans_csr @ V[:, n-1]`, plus a `Yphase_csr` matrix for phase-shifter
+corrections), the coefficient convolutions (`VV`, `S1`, `Fconv`, PV1 `aux`,
+the `W` inverse-voltage series) are `einsum` reductions along the stored
+series history, and the PV1 right-hand-side column correction is one sparse
+mat-vec (`Y_Vsp_cols`). The seven per-bus `evaluate_bus_eq_*` functions are
+gone; `evaluate_rhs` handles all bus groups, both PV models and both DSB
+methods. Same machine/settings as baseline.
+
+| case | method | time [s] | vs Phase 1 | vs baseline | coefficients | runs |
+|---|---|---|---|---|---|---|
+| case9 | PV2 | 0.002 | — | — | 15 | 2 |
+| case9 | DS-M2-PV2 | 0.002 | — | — | 15 | 2 |
+| case118 | PV2 | 0.027 | 2.3× | 2.1× | 15 | 3 |
+| case118 | DS-M2-PV2 | 0.026 | 2.3× | 2.2× | 15 | 3 |
+| case1354pegase | PV2 | 0.620 | 2.4× | 2.8× | 27 | 4 |
+| case1354pegase | DS-M2-PV2 | 0.733 | 2.3× | 3.2× | 27 | 5 |
+| case2869pegase | PV2 | 2.038 | 2.4× | 3.1× | 31 | 5 |
+| case2869pegase | DS-M2-PV2 | 1.653 | 2.3× | 3.0× | 27 | 5 |
+
+The recurrence itself is essentially free now: `evaluate_rhs` + the LU
+back-substitutions account for ~0.1 s of the 2.0 s on case2869pegase.
+Remaining profile: per-bus scalar `Pade()` calls ~70 % (Phase 3 batches
+these), `modif_Ytrans` LIL rebuilds after Q-limit switches ~25 %
+(4 × 160k Python-level element assignments — worth vectorizing into a COO
+build alongside Phase 3). Worst deviation vs stored references is unchanged
+from Phase 1 (3.9e-9 p.u. / 4.5e-7 deg over all 40 combinations): stopping
+points are identical, only the summation order changed. Side effect: the
+`ComplexWarning`s from implicit complex→float casts are gone (explicit
+`.real` everywhere), and the full test suite runs in 28 s instead of 85 s.

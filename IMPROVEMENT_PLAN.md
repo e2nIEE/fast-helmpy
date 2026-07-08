@@ -89,6 +89,16 @@ high-water mark reduced.
 
 ## Phase 2 — Vectorize the coefficient recurrence (~3–5 days, est. → ~0.4 s)
 
+> **Status: DONE (2026-07-08).** case2869pegase PV2: 4.82 s → 2.04 s (3.1×
+> cumulative vs baseline). All bus groups, both PV models and both DSB methods
+> are handled by one vectorized `evaluate_rhs`; the recurrence now costs ~0.1 s
+> — the remainder is Padé (~70 %, Phase 3) and the LIL matrix rebuilds after
+> Q-limit switches (~25 %). Deviations vs references unchanged from Phase 1;
+> all 41 tests pass (suite now 28 s instead of 85 s). One fidelity note: the
+> original DS-M2 slack-row shunt convolution pairs orders summing to n while
+> the PV rows pair n−1; replicated exactly (see comment in `evaluate_rhs`) —
+> worth clarifying against the paper in a later phase.
+
 This attacks the ~60 % of runtime spent in per-bus Python loops
 (`evaluate_bus_eq_*`, `calculate_inverse_voltages_w_array`,
 `compute_complex_voltages`, `Calculo_Vre_PV`). Highest effort, highest payoff;

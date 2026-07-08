@@ -268,24 +268,32 @@ class RunVariables:
         self.solve = None
         self.coefficients = np.empty((length,set_coef), dtype=np.float64)
         self.Soluc_eval = np.empty((length,set_coef), dtype=np.float64)
-        self.Soluc_no_eval = []
         self.V_complex = np.empty((N, set_coef), dtype=np.complex128)
         self.W = np.empty((N, set_coef), dtype=np.complex128)
 
-        # HELM pv_bus_model 2
-        if pv_bus_model == 2:
-            self.barras_CC = dict()
-            for i in self.list_gen:
-                self.barras_CC[i] = np.empty(set_coef, dtype=np.complex128)
-            self.VVanterior = np.empty(N, dtype=np.float64)
-        else: self.barras_CC=None; self.VVanterior=None
+        # Vectorized recurrence state (see helm.evaluate_rhs):
+        # YV[:, m] = Ytrans_csr @ V_complex[:, m]; F is the same product with
+        # the phase-shifter correction matrix (None when there is none);
+        # VV_prev holds sum_{k=1..n-2} V[k]*conj(V[n-1-k]) of the previous
+        # order for the shunt convolution.
+        self.YV = np.empty((N, set_coef), dtype=np.complex128)
+        if case.phase_barras.any():
+            self.F = np.empty((N, set_coef), dtype=np.complex128)
+        else:
+            self.F = None
+        self.VV_prev = np.zeros(N, dtype=np.float64)
+        # Bus-group index arrays; filled by helm.Unknowns_soluc
+        self.pq_idx = None
+        self.pv_idx = None
+        # Sparse case matrices; filled by helm.build_case_sparse_matrices
+        self.Ytrans_csr = None
+        self.Yphase_csr = None
 
         # HELM pv_bus_model 1
         if pv_bus_model == 1:
-            self.Y_Vsp_PV = []
+            self.Y_Vsp_cols = None  # set by helm.modif_Ytrans
             self.Vre_PV = np.empty((N, set_coef), dtype=np.float64)
-            self.resta_columnas_PV = np.empty(length, dtype=np.float64)
-        else: self.Y_Vsp_PV=None; self.Vre_PV=None; self.resta_columnas_PV=None
+        else: self.Y_Vsp_cols=None; self.Vre_PV=None
 
         # Distributed slack
         self.K = np.zeros(N, dtype=np.float64)
@@ -293,16 +301,7 @@ class RunVariables:
             self.Pg_imbalance = np.sum(case.Pd) - np.sum(case.Pg)
         else: self.Pg_imbalance=None
 
-        # DSB_model_method 2
-        if DSB_model_method == 2:
-            if pv_bus_model == 2:
-                self.barras_CC[case.slack] = np.empty(set_coef, dtype=np.complex128)
-                self.slack_CC = None
-            else: 
-                self.slack_CC  = np.empty(set_coef, dtype=np.complex128)
-        else:
-            self.slack_CC = None
-        
+
     def expand_coef_arrays(self):
         """
         Expand the arrays of coefficients to the maximum number of coefficents (max_coef).
@@ -336,27 +335,20 @@ class RunVariables:
             self.W = np.empty((N, max_coef), dtype=np.complex128)
             self.W[:,0:set_coef] = W
 
+            # YV
+            YV = self.YV
+            self.YV = np.empty((N, max_coef), dtype=np.complex128)
+            self.YV[:,0:set_coef] = YV
+
+            # F (phase-shifter products)
+            if self.F is not None:
+                F = self.F
+                self.F = np.empty((N, max_coef), dtype=np.complex128)
+                self.F[:,0:set_coef] = F
+
             if self.pv_bus_model == 1:
                 # Vre_PV
                 Vre_PV = self.Vre_PV
                 self.Vre_PV = np.empty((N, max_coef), dtype=np.float64)
                 self.Vre_PV[:,0:set_coef] = Vre_PV
-
-            if self.pv_bus_model == 2:
-                # barras_CC
-                for i in self.list_gen:
-                    barras_CC = self.barras_CC[i]
-                    self.barras_CC[i] = np.empty(max_coef, dtype=np.complex128)
-                    self.barras_CC[i][:set_coef] = barras_CC
-
-            # DSB_model_method 2
-            if self.DSB_model_method == 2:
-                if self.pv_bus_model == 2:
-                    barras_CC = self.barras_CC[self.slack]
-                    self.barras_CC[self.slack] = np.empty(max_coef, dtype=np.complex128)
-                    self.barras_CC[self.slack][:set_coef] = barras_CC
-                else: 
-                    slack_CC = self.slack_CC
-                    self.slack_CC = np.empty(max_coef, dtype=np.complex128)
-                    self.slack_CC[:set_coef] = slack_CC
 

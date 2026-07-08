@@ -14,7 +14,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.sparse import csc_matrix, lil_matrix
+from scipy.sparse import csc_matrix, csr_matrix, lil_matrix
 from scipy.sparse.linalg import factorized
 
 from helmpy.core.classes import RunVariables, CaseData
@@ -44,7 +44,13 @@ def modif_Ytrans(DSB_model_method, pv_bus_model, case, run):
     # needed O(N^2) memory (~264 MB at 2869 buses) plus a full scan to convert
     # to CSC, and put an effective ceiling on the solvable grid size.
     Ytrans_mod = lil_matrix((run.length, run.length), dtype=np.float64)
-    Y_Vsp_PV =[]
+    # Triplets of the matrix columns extracted for PV buses (pv_bus_model 1):
+    # column g of Y_Vsp_cols holds the Ytrans_mod column of PV bus
+    # run.list_gen[g], so the per-coefficient right-hand-side correction is a
+    # single sparse mat-vec with the PV real-voltage coefficients.
+    vsp_rows = []
+    vsp_cols = []
+    vsp_vals = []
 
     for i in range(N):
         if Buses_type[i] == 'Slack':
@@ -73,358 +79,235 @@ def modif_Ytrans(DSB_model_method, pv_bus_model, case, run):
         Ytrans_mod[2*N, 2*N] = -K[slack]
 
     if pv_bus_model == 1:
-        if DSB_model_method is None:
-            for i in run.list_gen:
-                array = np.zeros( 2*len(branches_buses[i]), dtype=np.float64)
-                pos = 0
-                for k in branches_buses[i]:
-                    array[pos] = Ytrans_mod[2*k, 2*i]
-                    array[pos+1] = Ytrans_mod[2*k+1, 2*i]
-                    Ytrans_mod[2*k, 2*i] = 0
-                    Ytrans_mod[2*k+1, 2*i] = 0
-                    pos += 2
-                Y_Vsp_PV.append([i, array.copy()])
-                Ytrans_mod[2*i + 1, 2*i] = 1
-        else:
-            for i in run.list_gen:
-                if slack in branches_buses[i]:
-                    array = np.zeros( 2*len(branches_buses[i])+1, dtype=np.float64)
-                else:
-                    array = np.zeros( 2*len(branches_buses[i]), dtype=np.float64)
-                pos = 0
-                for k in branches_buses[i]:
-                    array[pos] = Ytrans_mod[2*k, 2*i]
-                    array[pos+1] = Ytrans_mod[2*k+1, 2*i]
-                    Ytrans_mod[2*k, 2*i] = 0
-                    Ytrans_mod[2*k+1, 2*i] = 0
-                    pos += 2
-                if slack in branches_buses[i]:
-                    array[pos] = Ytrans_mod[2*N, 2*i]
+        for g, i in enumerate(run.list_gen):
+            for k in branches_buses[i]:
+                for row in (2*k, 2*k + 1):
+                    value = Ytrans_mod[row, 2*i]
+                    if value != 0:
+                        vsp_rows.append(row)
+                        vsp_cols.append(g)
+                        vsp_vals.append(value)
+                        Ytrans_mod[row, 2*i] = 0
+            if DSB_model_method is not None and slack in branches_buses[i]:
+                value = Ytrans_mod[2*N, 2*i]
+                if value != 0:
+                    vsp_rows.append(2*N)
+                    vsp_cols.append(g)
+                    vsp_vals.append(value)
                     Ytrans_mod[2*N, 2*i] = 0
-                Y_Vsp_PV.append([i, array.copy()])
-                Ytrans_mod[2*i + 1, 2*i] = 1
-        run.Y_Vsp_PV = Y_Vsp_PV
+            Ytrans_mod[2*i + 1, 2*i] = 1
+        run.Y_Vsp_cols = csc_matrix(
+            (vsp_vals, (vsp_rows, vsp_cols)),
+            shape=(run.length, len(run.list_gen)), dtype=np.float64,
+        )
 
     # Return a function for solving a sparse linear system, with Ytrans_mod pre-factorized.
     solve = factorized(csc_matrix(Ytrans_mod))
     run.solve = solve
 
 def Unknowns_soluc(DSB_model_method, pv_bus_model, N, run):
-    """Arrays and lists creation"""
+    """Initialize the order-0 coefficients and the bus-group index arrays used
+    by the vectorized right-hand-side evaluation."""
     # Assign local variables for faster access
     coefficients = run.coefficients
-    Soluc_no_eval = run.Soluc_no_eval
     Buses_type = run.Buses_type
+
+    # Bus groups. pv_idx is sorted and therefore identical to run.list_gen.
+    run.pq_idx = np.flatnonzero(Buses_type == 'PQ')
+    run.pv_idx = np.flatnonzero((Buses_type == 'PV') | (Buses_type == 'PVLIM'))
 
     # Assign 0 to the first coefficients and evaluated solutions.
     coefficients[:,0].fill(0)
     run.Soluc_eval[:,0].fill(0)
-    # Clear list of not evaluated solutions (function per bus)
-    Soluc_no_eval.clear()
+    # Order-0 solution: V = 1 at every bus. In PV model 1 the real part of the
+    # PV bus voltages lives in Vre_PV instead of the coefficients vector.
+    coefficients[0:2*N:2, 0] = 1
+    if pv_bus_model == 1:
+        coefficients[2*run.pv_idx, 0] = 0
 
-    for i in range(N):
-        if Buses_type[i] == 'PV' or Buses_type[i] == 'PVLIM':
-            if pv_bus_model == 1:
-                Soluc_no_eval.append([i,evaluate_bus_eq_dsb_generator_pv1])
-            else: # pv_bus_model == 2:
-                coefficients[2*i][0] = 1
-                Soluc_no_eval.append([i,evaluate_bus_eq_dsb_generator_pv2])
-        else:
-            coefficients[2*i][0] = 1
-            if Buses_type[i] == 'PQ':
-                Soluc_no_eval.append([i, evaluate_bus_eq_dsb_load])
-            else: # Buses_type[i] == 'slack'
-                Soluc_no_eval.append([i, evaluate_bus_eq_dsb_slack])
-    if DSB_model_method == 1:
-        Soluc_no_eval.append([N,evaluate_bus_eq_dsb_method1])
-    elif DSB_model_method == 2:
-        Soluc_no_eval.append([N,evaluate_bus_eq_dsb_method2])
+def build_case_sparse_matrices(case, run):
+    """CSR matrices used by the vectorized recurrence.
 
-def Calculo_Vre_PV(n, case, run):
-    """Real voltage of PV and PVLIM buses computing.
-    
-    coefficient n
+    Ytrans_csr holds the transfer admittances (row i restricted to
+    branches_buses[i], exactly the terms the former per-bus loops summed).
+    Yphase_csr holds the phase-shifter admittance corrections from
+    case.phase_dict, or None when the case has no phase-shifting branches.
     """
-    # Assign local variables for faster access
-    V = case.V
-    V_complex = run.V_complex
-    Vre_PV = run.Vre_PV
+    N = case.N
+    branches_buses = case.branches_buses
+    Ytrans = case.Ytrans
 
-    for i in run.list_gen:
-        if n > 1:
-            aux = 0
-            for k in range(1,n):
-                aux += V_complex[i][k] * np.conj(V_complex[i][n-k])
-            Vre_PV[i][n] = -aux/2
-        elif n == 1:
-            Vre_PV[i][n] = (V[i]**2 - 1)/2
+    counts = [len(branches_buses[i]) for i in range(N)]
+    indptr = np.zeros(N + 1, dtype=np.int64)
+    np.cumsum(counts, out=indptr[1:])
+    nnz = int(indptr[-1])
+    indices = np.fromiter(
+        (j for i in range(N) for j in branches_buses[i]), np.int64, nnz)
+    data = np.fromiter(
+        (Ytrans[i][j] for i in range(N) for j in branches_buses[i]),
+        np.complex128, nnz)
+    run.Ytrans_csr = csr_matrix((data, indices, indptr), shape=(N, N))
+
+    if case.phase_barras.any():
+        rows = []
+        cols = []
+        vals = []
+        for i in np.flatnonzero(case.phase_barras):
+            for k in range(len(case.phase_dict[i][0])):
+                rows.append(i)
+                cols.append(case.phase_dict[i][0][k])
+                vals.append(case.phase_dict[i][1][k])
+        run.Yphase_csr = csr_matrix(
+            (vals, (rows, cols)), shape=(N, N), dtype=np.complex128)
+    else:
+        run.Yphase_csr = None
 
 #---------------------------------------------------------------------------------------
-# Functions lo evaluate the rigth hand side of the matrix equation
-def evaluate_bus_eq_dsb_method1(_, n, Si, Pi, case, run):
-    """Function to evaluate the PV bus equation for the slack bus by method 1
-    
-    coefficient n
+def evaluate_rhs(n, Si, Pi, pv_bus_model, DSB_model_method, case, run):
+    """Vectorized evaluation of the order-n right hand side (Soluc_eval[:, n]).
+
+    Replaces the former per-bus evaluate_bus_eq_* functions: the neighbor sums
+    are sparse mat-vecs over all buses at once and the coefficient
+    convolutions are einsum reductions along the stored series history.
+    For pv_bus_model 1 this also fills Vre_PV[:, n].
     """
-    # Assign local variables for faster access
     N = case.N
-    phase_dict = case.phase_dict
+    slack = case.slack
+    V = run.V_complex
     W = run.W
-    V_complex = run.V_complex
-    coefficients = run.coefficients
-    i = case.slack
+    YV = run.YV
+    F = run.F
+    Soluc_eval = run.Soluc_eval
+    Yshunt = case.Yshunt
+    pq = run.pq_idx
+    pv = run.pv_idx
 
-    aux_Ploss = 0
-    for k in range(1,n):
-        aux_Ploss += coefficients[N*2][k]*np.conj(W[i][n-k])
-    
-    PP = 0
-    if case.phase_barras[i]:
-        for k in range(len(phase_dict[i][0])):
-            PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1]
+    Vn1 = V[:, n-1]
+    # Neighbor sums of the newest coefficient, for every bus at once:
+    # YV[:, m] = sum_k Ytrans[i,k] * V[k, m]
+    YV[:, n-1] = run.Ytrans_csr @ Vn1
+    Fn1 = None
+    if F is not None:
+        F[:, n-1] = run.Yphase_csr @ Vn1
+        Fn1 = F[:, n-1]
 
-    result = Pi[i]*np.conj(W[i][n-1]) - case.Yshunt[i]*V_complex[i][n-1] - PP + run.K[i]*aux_Ploss
+    Soluc_eval[:, n] = 0
 
-    run.Soluc_eval[2*N][n] = np.real(result)
+    # Convolutions along the coefficient history (orders 1 .. n-1), all buses
+    S1 = VV = Fconv = None
+    if n >= 2:
+        conjV_rev = np.conj(V[:, n-1:0:-1])
+        # VV_n = sum_{k=1..n-1} V[k]*conj(V[n-k]); real by conjugate symmetry
+        VV = np.einsum('ij,ij->i', V[:, 1:n], conjV_rev).real
+        if pv_bus_model == 2 or DSB_model_method == 2:
+            # S1 = sum_{x=1..n-1} conj(V[n-x]) * YV[x]
+            S1 = np.einsum('ij,ij->i', conjV_rev, YV[:, 1:n])
+            if F is not None:
+                # Fconv = sum_{x=0..n-1} conj(V[x]) * F[n-1-x]
+                Fconv = np.einsum('ij,ij->i', np.conj(V[:, :n]), F[:, n-1::-1])
 
+    # PQ buses: conj(S)*conj(W[n-1]) - Yshunt*V[n-1] - phase corrections
+    if pq.size:
+        result = np.conj(Si[pq]) * np.conj(W[pq, n-1]) - Yshunt[pq] * Vn1[pq]
+        if Fn1 is not None:
+            result = result - Fn1[pq]
+        Soluc_eval[2*pq, n] = result.real
+        Soluc_eval[2*pq + 1, n] = result.imag
 
-def evaluate_bus_eq_dsb_method2(_, n, Si, Pi, case, run):
-    """Function to evaluate the PV bus equation for the slack bus by method 2
-    
-    coefficient n"""
-    # Assign local variables for faster access
-    Ytrans = case.Ytrans
-    branches_buses = case.branches_buses
-    phase_dict = case.phase_dict
-    V_complex = run.V_complex
-    i = case.slack
-    if run.pv_bus_model == 2:
-        slack_CC = run.barras_CC[i]
-    else:
-        slack_CC = run.slack_CC
+    # PV buses
+    if pv.size:
+        if pv_bus_model == 2:
+            # Row 2i: real power balance; row 2i+1: voltage magnitude equation
+            if n == 1:
+                CC = Pi[pv] - Yshunt[pv].real
+                if Fn1 is not None:
+                    CC = CC - F[pv, 0].real
+                mag_rhs = (case.V[pv]**2 - 1) / 2
+            else:
+                CC = -S1[pv].real \
+                    - Yshunt[pv].real * (run.VV_prev[pv] + 2*Vn1[pv].real)
+                if Fconv is not None:
+                    CC = CC - Fconv[pv].real
+                mag_rhs = -VV[pv] / 2
+            Soluc_eval[2*pv, n] = CC
+            Soluc_eval[2*pv + 1, n] = mag_rhs
+        else:  # pv_bus_model == 1
+            if n == 1:
+                run.Vre_PV[pv, 1] = (case.V[pv]**2 - 1) / 2
+                result = Pi[pv] * np.conj(W[pv, 0]) - Yshunt[pv] * Vn1[pv]
+            else:
+                run.Vre_PV[pv, n] = -VV[pv] / 2
+                conjW_rev = np.conj(W[pv, n-1:0:-1])
+                # aux = sum_{k=1..n-1} coeff_re[k] * conj(W[n-k])
+                aux = np.einsum('ij,ij->i', run.coefficients[2*pv, 1:n], conjW_rev)
+                result = Pi[pv] * np.conj(W[pv, n-1]) - Yshunt[pv] * Vn1[pv] \
+                    - 1j*aux
+                if DSB_model_method is not None:
+                    # aux_Ploss = sum_{k=1..n-1} Ploss[k] * conj(W[n-k])
+                    aux_Ploss = conjW_rev @ run.coefficients[2*N, 1:n]
+                    result = result + run.K[pv] * aux_Ploss
+            if Fn1 is not None:
+                result = result - Fn1[pv]
+            Soluc_eval[2*pv, n] = result.real
+            Soluc_eval[2*pv + 1, n] = result.imag
 
-    if n > 2:
-        CC = 0
-        PPP = 0
-        for x in range(1, n-1):
-            PPP += np.conj(V_complex[i][n-x]) * slack_CC[x]
-        PP = 0
-        for k in branches_buses[i]:
-            PP += Ytrans[i][k] * V_complex[k][n-1]
-        slack_CC[n-1] = PP
-        PPP += np.conj(V_complex[i][1]) * PP
-        CC -= PPP.real
-        # Valor Shunt
-        if case.conduc_buses[i]:
-            VV = 0
-            for k in range(1,n-1):
-                VV += V_complex[i][k] * np.conj(V_complex[i][n-k])
-            CC -= np.real(case.Yshunt[i]) * ( VV + 2*V_complex[i][n-1].real )
-        # Valores phase
-        if case.phase_barras[i]:
-            PPP = 0
-            for x in range(n):
-                PP = 0
-                for k in range(len(phase_dict[i][0])):
-                    PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1-x]
-                PPP += np.conj(V_complex[i][x]) * PP
-            CC -= PPP.real
-    elif n == 1:
-        CC = Pi[i] - np.real(case.Yshunt[i])
-        # Valores phase
-        if case.phase_barras[i]:
-            for valor in phase_dict[i][1]:
-                CC -= valor.real
-    elif n == 2:
-        CC = 0
-        PP = 0
-        for k in branches_buses[i]:
-            PP += Ytrans[i][k] * V_complex[k][1]
-        slack_CC[1] = PP
-        CC -= ( np.conj(V_complex[i][1]) * PP ).real
-        # Valor Shunt
-        if case.conduc_buses[i]:
-            CC -= np.real(case.Yshunt[i])*2*V_complex[i][1].real
-        # Valores phase
-        if case.phase_barras[i]:
-            PPP = 0
-            for x in range(n):
-                PP = 0
-                for k in range(len(phase_dict[i][0])):
-                    PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1-x]
-                PPP += np.conj(V_complex[i][x]) * PP
-            CC -= PPP.real
-
-    run.Soluc_eval[2*case.N][n] = CC
-
-def evaluate_bus_eq_dsb_generator_pv1(i, n, Si, Pi, case, run):
-    """Function to evaluate the PV buses equation by py model 1
-    
-    bus i, coefficient n
-    """
-    # Assign local variables for faster access
-    N = case.N
-    phase_dict = case.phase_dict
-    W = run.W
-    V_complex = run.V_complex
-    coefficients = run.coefficients
-
-    aux = 0
-    for k in range(1,n):
-        aux += coefficients[i*2][k]*np.conj(W[i][n-k])
-    
-    aux_Ploss = 0
-    if run.DSB_model_method is not None:
-        for k in range(1,n):
-            aux_Ploss += coefficients[N*2][k]*np.conj(W[i][n-k])
-    
-    PP = 0
-    if case.phase_barras[i]:
-        for k in range(len(phase_dict[i][0])):
-            PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1]
-    
-    result = Pi[i]*np.conj(W[i][n-1]) - case.Yshunt[i]*V_complex[i][n-1]  - PP - aux*1j + run.K[i]*aux_Ploss
-    
-    run.Soluc_eval[2*i][n] = np.real(result)
-    run.Soluc_eval[2*i + 1][n] = np.imag(result)
-
-def evaluate_bus_eq_dsb_generator_pv2(i, n, Si, Pi, case, run):
-    """Function to evaluate the PV buses equation by py model 2
-    
-    bus i, coefficient n
-    """
-    # Assign local variables for faster access
-    Ytrans = case.Ytrans
-    branches_buses = case.branches_buses
-    phase_dict = case.phase_dict
-    V_complex = run.V_complex
-    barras_CC = run.barras_CC
-
-    if n > 2:
-        CC = 0
-        PPP = 0
-        for x in range(1,n-1):
-            PPP += np.conj(V_complex[i][n-x]) * barras_CC[i][x]
-        PP = 0
-        for k in branches_buses[i]:
-            PP += Ytrans[i][k] * V_complex[k][n-1]
-        barras_CC[i][n-1] = PP
-        PPP += np.conj(V_complex[i][1]) * PP
-        CC -= PPP.real
-        # Valor Shunt
-        if case.conduc_buses[i]:
-            CC -= np.real(case.Yshunt[i]) * ( run.VVanterior[i] + 2*V_complex[i][n-1].real )
-        # Valores phase
-        if case.phase_barras[i]:
-            PPP = 0
-            for x in range(n):
-                PP = 0
-                for k in range(len(phase_dict[i][0])):
-                    PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1-x]
-                PPP += np.conj(V_complex[i][x]) * PP
-            CC -= PPP.real
-    elif n == 2:
-        CC = 0
-        PP = 0
-        for k in branches_buses[i]:
-            PP += Ytrans[i][k] * V_complex[k][1]
-        barras_CC[i][1] = PP
-        CC -= ( np.conj(V_complex[i][1]) * PP ).real
-        # Valor Shunt
-        if case.conduc_buses[i]:
-            CC -= np.real(case.Yshunt[i])*2*V_complex[i][1].real
-        # Valores phase
-        if case.phase_barras[i]:
-            PPP = 0
-            for x in range(n):
-                PP = 0
-                for k in range(len(phase_dict[i][0])):
-                    PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1-x]
-                PPP += np.conj(V_complex[i][x]) * PP
-            CC -= PPP.real
-    elif n == 1:
-        CC = Pi[i] - np.real(case.Yshunt[i])
-        # Valores phase
-        if case.phase_barras[i]:
-            for valor in phase_dict[i][1]:
-                CC -= valor.real
-
+    # Slack bus rows: V = V_specified at order 1, zero afterwards
     if n == 1:
-        VV = case.V[i]**2 - 1
-    else:
-        VV = 0
-        for k in range(1,n):
-            VV += V_complex[i][k] * np.conj(V_complex[i][n-k])
-        run.VVanterior[i] = VV
-        VV = -VV
+        Soluc_eval[2*slack, 1] = case.V[slack] - 1
+        Soluc_eval[2*slack + 1, 1] = 0
 
-    run.Soluc_eval[2*i][n] = CC
-    run.Soluc_eval[2*i + 1][n] = VV/2
+    # Distributed-slack row (2N): real power balance of the slack bus
+    if DSB_model_method == 1:
+        if n == 1:
+            aux_Ploss = 0
+        else:
+            aux_Ploss = np.dot(run.coefficients[2*N, 1:n],
+                               np.conj(W[slack, n-1:0:-1]))
+        result = Pi[slack] * np.conj(W[slack, n-1]) \
+            - Yshunt[slack] * Vn1[slack] + run.K[slack] * aux_Ploss
+        if Fn1 is not None:
+            result = result - Fn1[slack]
+        Soluc_eval[2*N, n] = result.real
+    elif DSB_model_method == 2:
+        if n == 1:
+            CC = Pi[slack] - Yshunt[slack].real
+            if Fn1 is not None:
+                CC = CC - F[slack, 0].real
+        else:
+            CC = -S1[slack].real
+            if case.conduc_buses[slack]:
+                # Faithful to the original slack formula, whose shunt
+                # convolution pairs orders summing to n (the PV-bus rows pair
+                # orders summing to n-1); kept as-is for regression fidelity.
+                slack_VV = VV[slack] - (V[slack, n-1] * np.conj(V[slack, 1])).real
+                CC = CC - Yshunt[slack].real * (slack_VV + 2*Vn1[slack].real)
+            if Fconv is not None:
+                CC = CC - Fconv[slack].real
+        Soluc_eval[2*N, n] = CC
 
-def evaluate_bus_eq_dsb_load(i, n, Si, Pi, case, run):
-    """Function to evaluate the PQ buses equation
-    
-    bus i, coefficient n
-    """
-    # Assign local variables for faster access
-    phase_dict = case.phase_dict
-    W = run.W
-    V_complex = run.V_complex
-
-    PP = 0
-    if case.phase_barras[i]:
-        for k in range(len(phase_dict[i][0])):
-            PP += phase_dict[i][1][k] * V_complex[phase_dict[i][0][k]][n-1]
-    
-    result = np.conj(Si[i])*np.conj(W[i][n-1]) - case.Yshunt[i]*V_complex[i][n-1] - PP
-    
-    run.Soluc_eval[2*i][n] = np.real(result)
-    run.Soluc_eval[2*i + 1][n] = np.imag(result)
-
-def evaluate_bus_eq_dsb_slack(i, n, Si, Pi, case, run):
-    """Function to evaluate the slack bus equation
-    
-    bus i, coefficient n
-    """
-    if n == 1:
-        run.Soluc_eval[2*i][n] = case.V[i] - 1
-        run.Soluc_eval[2*i + 1][n] = 0
-    else:
-        run.Soluc_eval[2*i][n] = 0
-        run.Soluc_eval[2*i + 1][n] = 0
+    # History term for the next order's shunt convolution
+    if VV is not None:
+        run.VV_prev[:] = VV
 
 #---------------------------------------------------------------------------------------
 def compute_complex_voltages(n, pv_bus_model, case, run):
-    """Complex voltages computing
-    
-    coefficient n"""
+    """Complex voltages of coefficient n from the solved real/imag pairs."""
     # Assign local variables for faster access
-    Vre_PV = run.Vre_PV
-    V_complex = run.V_complex
     coefficients = run.coefficients
-    Buses_type = run.Buses_type
+    N = case.N
 
-    if pv_bus_model == 2:
-        for i in range(case.N):
-            V_complex[i][n] = coefficients[i*2][n] + 1j*coefficients[i*2 + 1][n]
-    else: # pv_bus_model == 1:
-        for i in range(case.N):
-            if Buses_type[i] == 'PV' or Buses_type[i] == 'PVLIM':
-                V_complex[i][n] = Vre_PV[i][n] + 1j*coefficients[i*2 + 1][n]
-            else:
-                V_complex[i][n] = coefficients[i*2][n] + 1j*coefficients[i*2 + 1][n]
+    run.V_complex[:, n] = coefficients[0:2*N:2, n] + 1j*coefficients[1:2*N:2, n]
+    if pv_bus_model == 1 and run.pv_idx.size:
+        pv = run.pv_idx
+        run.V_complex[pv, n] = run.Vre_PV[pv, n] + 1j*coefficients[2*pv + 1, n]
 
 def calculate_inverse_voltages_w_array(n, case, run):
-    """W computing - Inverse voltages "W" array"""
-    # Assign local variables for faster access
-    W = run.W
-    V_complex = run.V_complex
+    """W computing - Inverse voltages "W" array.
 
-    for i in range(case.N):
-        aux = 0
-        for k in range(n):
-            aux += (W[i][k] * V_complex[i][n-k])
-        W[i][n] = -aux
+    W[:, n] = -sum_{k=0..n-1} W[:, k] * V[:, n-k] for every bus at once.
+    """
+    run.W[:, n] = -np.einsum(
+        'ij,ij->i', run.W[:, :n], run.V_complex[:, n:0:-1])
 
 def P_iny(i, case, run):
     """Computing P injection at bus i. Must be used after Voltages_profile()"""
@@ -537,17 +420,12 @@ def computing_voltages_mismatch(
     the final full-accuracy pass after the coarse Q-limit phase.
     """
     # Assign local variables for faster access
-    slack = case.slack
-    branches_buses = case.branches_buses
-    Soluc_no_eval = run.Soluc_no_eval
     N = case.N
-    Y_Vsp_PV = run.Y_Vsp_PV
     list_coef = run.list_coef
     solve = run.solve
     V_complex_profile = run.V_complex_profile
     Soluc_eval = run.Soluc_eval
     coefficients = run.coefficients
-    resta_columnas_PV = run.resta_columnas_PV
     Vre_PV = run.Vre_PV
     V_complex = run.V_complex
     
@@ -585,6 +463,7 @@ def computing_voltages_mismatch(
         if pv_bus_model == 1:
             Vre_PV[:,0] = 1
         compute_complex_voltages(0, pv_bus_model, case, run)
+        run.VV_prev[:] = 0
 
     # Compute active and complex power injection
     Pi = run.Pg - case.Pd
@@ -603,29 +482,16 @@ def computing_voltages_mismatch(
         if detailed_run_print:
             print("Computing coefficient: %d"%coef_actual)
 
-        # Compute Vre_PV for current coefficient. Only for pv_bus_model 1 
-        if pv_bus_model == 1:
-            Calculo_Vre_PV(coef_actual, case, run)
-
-        # Compute the right hand side of the matrix equation
-        for i in range(len(Soluc_no_eval)):
-            Soluc_no_eval[i][1](Soluc_no_eval[i][0], coef_actual, Si, Pi, case, run)
+        # Compute the right hand side of the matrix equation (fills
+        # Soluc_eval[:, n] for all buses; also Vre_PV[:, n] for pv_bus_model 1)
+        evaluate_rhs(coef_actual, Si, Pi, pv_bus_model, DSB_model_method, case, run)
 
         # Determine right_hand_side of matrix equation
         if pv_bus_model == 1:
-            # Columns to subtract
-            resta_columnas_PV.fill(0)
-            for Vre_vec in Y_Vsp_PV:
-                array = Vre_PV[Vre_vec[0]][coef_actual] * Vre_vec[1]
-                pos = 0
-                for k in branches_buses[Vre_vec[0]]:
-                    resta_columnas_PV[2*k] += array[pos]
-                    resta_columnas_PV[2*k+1] += array[pos+1]
-                    pos += 2
-                if DSB_model_method is not None:
-                    if slack in branches_buses[Vre_vec[0]]:
-                        resta_columnas_PV[2*N] += array[pos]
-            right_hand_side = Soluc_eval[:,coef_actual] - resta_columnas_PV
+            # Subtract the extracted PV-bus matrix columns times the PV real
+            # voltage coefficients (single sparse mat-vec)
+            right_hand_side = Soluc_eval[:,coef_actual] \
+                - run.Y_Vsp_cols @ Vre_PV[run.list_gen, coef_actual]
         else: # pv_bus_model == 2:
             right_hand_side = Soluc_eval[:,coef_actual]
 
@@ -959,6 +825,10 @@ def helm(case, detailed_run_print=False, mismatch=1e-4, scale=1, max_coefficient
     # Optional externally-supplied distributed-slack participation factors (one weight per
     # bus). When given, they override the default generation-proportional K factors.
     run.external_K = K_factors
+
+    # Sparse case matrices for the vectorized recurrence (independent of bus
+    # types, so they survive PVLIM->PQ switches)
+    build_case_sparse_matrices(case, run)
 
     # Two-phase Q-limit enforcement: PVLIM->PQ switching decisions only need a
     # coarse solution, so while bus types are still settling the series is only
