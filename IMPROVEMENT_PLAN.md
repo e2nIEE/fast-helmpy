@@ -135,6 +135,15 @@ Phase 1 on the recurrence portion of the profile.
 
 ## Phase 3 — Analytic continuation overhaul (~2–3 days, est. → ~0.2 s)
 
+> **Status: DONE (2026-07-08).** case2869pegase PV2: 2.04 s → 0.39 s (16× vs
+> baseline; plan target ~0.2 s roughly met given the extra Q-limit runs).
+> Batched Padé (`pade_batched`, stride-tricks Hankel stack + one stacked
+> LAPACK solve, machine-precision equal to scalar `Pade`), residual-based
+> convergence as default (`convergence='pade'` restores the legacy criterion),
+> and array-wise COO assembly of `Ytrans_mod`. Profile is now dominated by
+> SuperLU/einsum/LAPACK — the pure-numpy plateau. All 41 tests pass (suite
+> 9.4 s); deviations vs references unchanged.
+
 Padé is ~30 % of the baseline and is currently 24 759 scalar calls per run on
 case2869. Two sub-steps:
 

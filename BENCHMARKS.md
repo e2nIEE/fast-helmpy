@@ -98,3 +98,38 @@ from Phase 1 (3.9e-9 p.u. / 4.5e-7 deg over all 40 combinations): stopping
 points are identical, only the summation order changed. Side effect: the
 `ComplexWarning`s from implicit complex→float casts are gone (explicit
 `.real` everywhere), and the full test suite runs in 28 s instead of 85 s.
+
+## Phase 3 — batched continuation + residual criterion (2026-07-08)
+
+Changes: (a) `pade_batched` evaluates the diagonal Padé approximant of every
+bus in one stacked LAPACK solve — the Hankel denominator matrices are a
+stride-tricks view of the coefficient array, and buses with negligible
+coefficient tails are summed directly; matches the scalar `Pade()` to
+machine precision (4.7e-16 on case118). (b) The default convergence check is
+now **physical**: the power residual of the continued voltages
+(`‖S_spec − V∘conj(Y·V)‖∞`, one sparse mat-vec per check, plus PV magnitude
+and slack voltage defects; with distributed slack, K·Ploss enters P_spec and
+the slack P balance is checked). The legacy consecutive-Padé comparison
+remains available via `helm(..., convergence='pade')`. (c) `modif_Ytrans`
+assembles COO triplets array-wise from the sparse Ytrans pattern instead of
+160k Python-level LIL assignments. Same machine/settings as baseline.
+
+| case | method | time [s] | vs Phase 2 | vs baseline | coefficients | runs |
+|---|---|---|---|---|---|---|
+| case9 | PV2 | 0.004 | — | — | 13 | 2 |
+| case9 | DS-M2-PV2 | 0.003 | — | — | 13 | 2 |
+| case118 | PV2 | 0.014 | 1.9× | 4.1× | 15 | 3 |
+| case118 | DS-M2-PV2 | 0.011 | 2.4× | 5.3× | 15 | 3 |
+| case1354pegase | PV2 | 0.107 | 5.8× | 16.2× | 27 | 4 |
+| case1354pegase | DS-M2-PV2 | 0.173 | 4.2× | 13.6× | 31 | 5 |
+| case2869pegase | PV2 | 0.392 | 5.2× | 16.1× | 31 | 5 |
+| case2869pegase | DS-M2-PV2 | 0.337 | 4.9× | 14.5× | 31 | 5 |
+
+Profile on case2869pegase is now dominated by real numerical work: SuperLU
+back-substitutions 0.07 s, einsum convolutions 0.06 s, batched Padé 0.11 s,
+LU refactorizations after Q-limit switches 0.04 s. This is the plateau for
+pure numpy/scipy — further wall-clock gains come from needing fewer runs
+(Phase 5 hybrid) or fewer coefficients (Phase 6 multistage embedding).
+On both criteria the final voltages of case118/case2869 are bit-identical;
+worst deviation vs stored references over all 40 combinations: 3.9e-9 p.u. /
+4.5e-7 deg (unchanged since Phase 1). Full test suite: 9.4 s.
