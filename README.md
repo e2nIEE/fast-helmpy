@@ -10,16 +10,78 @@ related to this subject.
 The developed code is properly commented and organized
 so it would be easy to understand and modify.
 
+## Installation
+
+```
+pip install git+https://github.com/vogt31337/HELMpy.git
+```
+
+The core solver needs only `numpy` and `scipy`. Loading grids from `.xlsx`
+files and the Newton-Raphson solvers additionally need `pandas`/`openpyxl`:
+`pip install helmpy[xlsx]`.
+
+## Using HELMpy as a library
+
+`solve_helm` solves a power flow directly from per-unit arrays — no files
+involved. Bus types follow the ppc/pypower convention (1 = PQ, 2 = PV,
+3 = slack):
+
+```python
+import numpy as np
+from helmpy import solve_helm
+
+result = solve_helm(
+    Ybus,          # (N, N) bus admittance matrix, dense or scipy.sparse
+    Sbus,          # (N,) complex net power injection per bus (gen - load)
+    bus_types,     # (N,) ints: 1=PQ, 2=PV, 3=slack (exactly one)
+    V_specified,   # (N,) voltage magnitude setpoints (used at PV/slack)
+    Qmin=Qmin, Qmax=Qmax,   # optional generator reactive limits per bus
+    mismatch=1e-8,
+)
+if result.converged:
+    V = result.V                    # complex bus voltages
+    S = result.S_injection          # complex power injections
+    print(result.n_coefficients, result.residual, result.switched_buses)
+```
+
+Calling it from **pandapower** takes a small adapter — the arrays already
+exist after any `runpp` attempt (or via `pandapower.pd2ppc`):
+
+```python
+import numpy as np
+import pandapower as pp
+from helmpy import solve_helm
+
+net = ...                     # your pandapower net
+try:
+    pp.runpp(net)
+except pp.LoadflowNotConverged:
+    ppc = net._ppc
+    internal = ppc["internal"]
+    Ybus, Sbus = internal["Ybus"], internal["Sbus"]
+    bus_types = np.ones(len(Sbus), dtype=int)
+    bus_types[internal["pv"]] = 2
+    bus_types[internal["ref"]] = 3
+    result = solve_helm(Ybus, Sbus, bus_types, np.abs(internal["V0"]),
+                        slack_angle_degrees=net.ext_grid.va_degree.iloc[0])
+    # result.V is a robust start vector: pp.runpp(net, init_vm_pu=..., init_va_degree=...)
+```
+
+Solver progress is reported through the `helmpy` `logging` logger (no prints
+in library mode). Since HELMpy is used as a separate library here, its AGPL
+license does not affect the license of the calling code base.
+
 ## Repository structure
 
 - data: sample data of large-sized, complex practical grids for testing purposes. Already computed results can also be found
 - helmm: matlab files for downloading and parsing to `.xlsx` matpower grids
 - helmpy: scripts with core functionality
-- test: scripts for running tests using sample grids from `data` directory
+- test: pytest regression suite (`pytest -m "not slow"` for the fast gate)
+- benchmark: wall-clock benchmark harness (see `BENCHMARKS.md`)
 
 ## Compatibility
 
-This package is compatible with Python 3.6 and 3.7.
+This package requires Python >= 3.9 and is tested on 3.10–3.13.
 
 ## History
 

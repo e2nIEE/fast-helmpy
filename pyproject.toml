@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "helmpy"
+version = "0.2.0"
+description = "Power flow solvers including the Holomorphic Embedding Load Flow Method (HELM)"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Tulio Molina" },
+    { name = "Juan José Ortega" },
+]
+keywords = ["power flow", "load flow", "HELM", "holomorphic embedding", "power systems"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.8",
+]
+
+[project.optional-dependencies]
+# xlsx case loading and result writing (create_case_data_object_from_xlsx,
+# save_results) and the Newton-Raphson solvers
+xlsx = ["pandas", "openpyxl"]
+test = ["pytest", "pandas", "openpyxl"]
+
+[project.urls]
+Homepage = "https://github.com/vogt31337/HELMpy"
+Upstream = "https://github.com/HELMpy/HELMpy"
+
+[tool.setuptools.packages.find]
+include = ["helmpy*"]

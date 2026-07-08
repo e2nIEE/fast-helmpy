@@ -181,6 +181,19 @@ runtime ≤ ~0.3 s; convergence decisions consistent across the test matrix.
 
 ## Phase 4 — Library API + packaging for pandapower (~2–4 days, no speedup goal)
 
+> **Status: DONE (2026-07-09).** `helmpy.solve_helm(Ybus, Sbus, bus_types,
+> V_specified, ...)` solves from per-unit ppc-style arrays and returns a
+> `HelmResults` object (V, residual, S_injection, switched buses, run stats);
+> internally the full Ybus is split into a zero-row-sum transfer matrix +
+> shunts (valid embedding also for phase-shifter grids — verified against the
+> pegase references). `import helmpy` needs only numpy/scipy (pandas/openpyxl
+> moved to the `[xlsx]` extra, NR modules lazy); solver messages go through
+> `logging`; Q-limit checking no longer touches the dense Y (array-built
+> cases skip O(N²) memory entirely). `pyproject.toml` (v0.2.0) replaces
+> setup.py/requirements.txt (numba dropped — unused); CI workflow (Linux +
+> Windows, py3.10/3.13) runs the suite; wheel builds. README documents the
+> pandapower adapter. Suite: 49 tests, all green.
+
 Turns the optimized solver into the dependency pandapower will actually call.
 
 **Tasks**

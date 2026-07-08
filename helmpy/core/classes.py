@@ -1,7 +1,6 @@
 
 from os.path import basename
 import numpy as np
-import pandas as pd
 
 
 
@@ -114,6 +113,8 @@ def process_branches(branches, N_branches, case):
 
 def create_case_data_object_from_xlsx(grid_data_file_path, case_name=None):
     """Creates a case data object from an xlsx containing the information."""
+    import pandas as pd  # optional dependency, only needed for the xlsx frontend
+
     if not (case_name is None or type(case_name) is str):
         print("Erroneous argument type.")
         return None
@@ -177,8 +178,15 @@ def create_case_data_object_from_xlsx(grid_data_file_path, case_name=None):
 
 
 class CaseData:
-    """Data of a case."""
-    def __init__(self, name: str, N: np.int64, N_generators: np.int64):
+    """Data of a case.
+
+    dense_matrices=False skips the O(N^2) dense Ytrans/Y arrays; solving then
+    requires precomputed sparse matrices on the case (see
+    helmpy.api.create_case_from_arrays), and the branch-level reporting path
+    (power_balance, save_results) is unavailable.
+    """
+    def __init__(self, name: str, N: np.int64, N_generators: np.int64,
+                 dense_matrices: bool = True):
         # case name
         self.name = name
 
@@ -205,10 +213,20 @@ class CaseData:
         self.Shunt = np.empty(N, dtype=np.complex128)
         self.conduc_buses = np.full(N, False)
         self.Yshunt = np.empty(N, dtype=np.complex128)
-        self.Ytrans = np.zeros((N, N), dtype=np.complex128)
-        self.Y = np.zeros((N, N), dtype=np.complex128)
-        self.Yre = np.real(self.Y)
-        self.Yimag = np.imag(self.Y)
+        if dense_matrices:
+            self.Ytrans = np.zeros((N, N), dtype=np.complex128)
+            self.Y = np.zeros((N, N), dtype=np.complex128)
+            self.Yre = np.real(self.Y)
+            self.Yimag = np.imag(self.Y)
+        else:
+            self.Ytrans = None
+            self.Y = None
+            self.Yre = None
+            self.Yimag = None
+        # Optional precomputed sparse matrices (helmpy.api array frontend);
+        # helm.build_case_sparse_matrices uses them when present.
+        self.Ytrans_csr = None
+        self.Yphase_csr = None
         self.branches_buses = [[i] for i in range(N)]  # Convert list of lists to a 2D array
         self.Ybr_list = []  # List of [from_bus, to_bus, 2x2 complex Ybr] triples
         self.phase_barras = np.full(N, False)

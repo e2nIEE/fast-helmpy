@@ -9,22 +9,17 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU Affero General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
-import warnings
+import logging
+from typing import Tuple
 
 import numpy as np
-import pandas as pd
 from scipy.sparse import csc_matrix, csr_matrix
 from scipy.sparse.linalg import factorized
 
 from helmpy.core.classes import RunVariables, CaseData
 from helmpy.core.analytic_continuation import Pade, pade_batched
 
-warnings.filterwarnings("ignore")
-pd.set_option('display.max_rows',1000)
-pd.set_option('display.max_columns',1000)
-pd.set_option('display.width',1000)
-
-from typing import Tuple
+logger = logging.getLogger(__name__)
 
 def modif_Ytrans(DSB_model_method, pv_bus_model, case, run):
     """Create the modified Y matrix (CSC, pre-factorized into run.solve) and,
@@ -155,7 +150,15 @@ def build_case_sparse_matrices(case, run):
     branches_buses[i], exactly the terms the former per-bus loops summed).
     Yphase_csr holds the phase-shifter admittance corrections from
     case.phase_dict, or None when the case has no phase-shifting branches.
+
+    Cases built from arrays (helmpy.api) carry precomputed sparse matrices;
+    those are used directly.
     """
+    if case.Ytrans_csr is not None:
+        run.Ytrans_csr = case.Ytrans_csr
+        run.Yphase_csr = case.Yphase_csr
+        return
+
     N = case.N
     branches_buses = case.branches_buses
     Ytrans = case.Ytrans
@@ -373,9 +376,18 @@ def check_PVLIM_violation(detailed_run_print, case, run):
     list_gen_remove = run.list_gen_remove
     Buses_type = run.Buses_type
 
+    # Reactive injection at every bus from the converged voltages: one sparse
+    # mat-vec (equivalent to the per-bus Q_iny sums, but without needing the
+    # dense Y matrix, which array-built cases do not carry)
+    V = run.V_complex_profile
+    Ybus_V = run.Ytrans_csr @ V + case.Yshunt * V
+    if run.Yphase_csr is not None:
+        Ybus_V += run.Yphase_csr @ V
+    Q_injection = (V * np.conj(Ybus_V)).imag
+
     flag_violacion = False
     for i in list_gen:
-        Qg_incog = Q_iny(i, case, run) + Qd[i]
+        Qg_incog = Q_injection[i] + Qd[i]
         Qg[i] = Qg_incog
         if Qg_incog > Qgmax[i] or Qg_incog < Qgmin[i]:
             flag_violacion = True
@@ -383,7 +395,9 @@ def check_PVLIM_violation(detailed_run_print, case, run):
             list_gen_remove.append(i)
             Qg[i] = Qgmax[i] if Qg_incog > Qgmax[i] else Qgmin[i]
             if detailed_run_print:
-                print('Bus %d exceeded its Qgen limit with %f. The exceeded limit %f will be assigned to the bus'%(i+1,Qg_incog,Qg[i]))
+                logger.info(
+                    'Bus %d exceeded its Qgen limit with %f. The exceeded '
+                    'limit %f will be assigned to the bus', i+1, Qg_incog, Qg[i])
     return flag_violacion
 
 def compute_k_factor(case, run):
@@ -538,7 +552,7 @@ def computing_voltages_mismatch(
             # Expand the coeffcients arrays to the maximum. They were originally set to 40
             run.expand_coef_arrays()
         if detailed_run_print:
-            print("Computing coefficient: %d"%coef_actual)
+            logger.debug("Computing coefficient: %d", coef_actual)
 
         # Compute the right hand side of the matrix equation (fills
         # Soluc_eval[:, n] for all buses; also Vre_PV[:, n] for pv_bus_model 1)
@@ -573,8 +587,8 @@ def computing_voltages_mismatch(
                                           DSB_model_method, case, run)
                 flag_mismatch = residual > mismatch
                 if detailed_run_print:
-                    print("Power residual at %d coefficients: %.3e"
-                          % (series_large, residual))
+                    logger.debug("Power residual at %d coefficients: %.3e",
+                                 series_large, residual)
             else:  # convergence == 'pade' (legacy criterion)
                 if first_check:
                     first_check = False
@@ -593,16 +607,15 @@ def computing_voltages_mismatch(
                 # Qgen check or ignore limits
                 if enforce_Q_limits:
                     if check_PVLIM_violation(detailed_run_print, case, run):
-                        if detailed_run_print:
-                            print("At coefficient %d the system is to be resolved due to PVLIM to PQ switches\n"%series_large)
+                        logger.info("At coefficient %d the system is to be resolved due to PVLIM to PQ switches", series_large)
                         list_coef.append(series_large)
                         flag_recalculate = True
                         break
-                print('\nConvergence has been reached. %d coefficients were calculated'%series_large)
+                logger.info('Convergence has been reached. %d coefficients were calculated', series_large)
                 list_coef.append(series_large)
                 break
         if series_large > max_coef-1:
-            print('\nMaximum number of coefficients has been reached. The problem has no physical solution')
+            logger.warning('Maximum number of coefficients has been reached. The problem has no physical solution')
             flag_divergence = True
             break
     
@@ -759,6 +772,8 @@ def write_results_on_files(
     results_file_name, run,
     power_balance_string,
 ):
+    import pandas as pd  # optional dependency, only needed for xlsx reports
+
     files_name = \
         'Results' + ' ' + \
         algorithm + ' ' + \
@@ -822,19 +837,13 @@ def validate_arguments(
             type(DSB_model_method) is int
         )
     ):
-        print("Erroneous argument type.")
-        return False, None
+        raise ValueError("Erroneous argument type.")
     if max_coefficients < 5:
-        print("'max_coefficients' must be equal or greater than five (5).")
-        return False, None
+        raise ValueError("'max_coefficients' must be equal or greater than five (5).")
     if pv_bus_model not in (1, 2):
-        print("'pv_bus_model' must be the integer 1 or 2.",)
-        return False, None
+        raise ValueError("'pv_bus_model' must be the integer 1 or 2.")
     if DSB_model_method is not None and DSB_model_method not in (1, 2):
-        print("'DSB_model_method' must be the integer 1 or 2.",)
-        return False, None
-
-    return True
+        raise ValueError("'DSB_model_method' must be the integer 1 or 2.")
 
 
 # Main loop
@@ -843,12 +852,15 @@ def helm(case, detailed_run_print=False, mismatch=1e-4, scale=1, max_coefficient
          K_factors=None, convergence='residual',
          ) -> Tuple[RunVariables, int, bool]:
 
-    # Arguments validation
-    if not validate_arguments(case, detailed_run_print, mismatch, scale, max_coefficients, enforce_Q_limits,
-                              results_file_name, save_results, pv_bus_model, DSB_model, DSB_model_method):
-        raise ValueError('Arguments were wrong.')
+    # Arguments validation (raises ValueError on bad input)
+    validate_arguments(case, detailed_run_print, mismatch, scale, max_coefficients, enforce_Q_limits,
+                       results_file_name, save_results, pv_bus_model, DSB_model, DSB_model_method)
     if convergence not in ('residual', 'pade'):
         raise ValueError("'convergence' must be 'residual' or 'pade'.")
+    if (detailed_run_print or save_results) and case.Y is None:
+        raise ValueError("detailed_run_print/save_results need a case with "
+                         "branch-level data (xlsx frontend); array-built "
+                         "cases do not carry it.")
 
     if DSB_model and DSB_model_method is None:
         DSB_model_method = 2
