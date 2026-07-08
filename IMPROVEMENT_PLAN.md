@@ -43,6 +43,15 @@ timings recorded.
 
 ## Phase 1 — Quick wins, no structural change (~1–2 days, est. 6.3 s → ~1.2 s)
 
+> **Status: DONE (2026-07-08), delivered less than estimated.** Measured
+> 1.2–1.4× on the pegase cases (case2869 PV2: 6.33 s → 4.82 s), not ~5×: the
+> two-phase scheme shortens the Q-limit restart runs but cannot remove them,
+> and their per-coefficient cost stays until Phase 2. Includes a series
+> *resume* for the final full-accuracy pass (extends the coarse series when no
+> bus switched). Details and revised reasoning in `BENCHMARKS.md`. The 41-test
+> regression suite passes; gates relaxed to 1e-7 p.u. / 5e-6 deg because
+> stopping points changed (worst observed deviation 3.9e-9 / 4.5e-7).
+
 Three independent changes, each small and separately verifiable.
 
 ### 1.1 Two-phase Q-limit enforcement  *(measured ~5× on case2869)*

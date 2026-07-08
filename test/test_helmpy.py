@@ -13,12 +13,15 @@ import pytest
 from conftest import get_case_bundle
 import helmpy
 
-# Tolerances against the stored references. Worst observed deviation on
-# 2026-07-07 (numpy 2.x, all 40 combinations): 4.2e-13 p.u. / 4.5e-11 deg.
-# Kept ~100x above that so legitimate refactoring (e.g. reordered float
-# summation) passes while real logic errors (typically > 1e-6) fail.
-MAGNITUDE_ATOL = 1e-10  # p.u.
-ANGLE_ATOL = 1e-8  # degrees
+# Tolerances against the stored references. Since Phase 1 the solver stops at
+# different series lengths than the run that generated the references (check
+# cadence, two-phase Q-limit enforcement), so solutions agree with them only to
+# the convergence tolerance (MISMATCH), not bit-level. Worst observed deviation
+# on 2026-07-07 after Phase 1 (all 40 combinations): 3.9e-9 p.u. / 4.5e-7 deg;
+# gates keep >10x headroom while real logic errors (typically > 1e-4) still
+# fail clearly.
+MAGNITUDE_ATOL = 1e-7  # p.u.
+ANGLE_ATOL = 5e-6  # degrees
 
 MISMATCH = 1e-8
 

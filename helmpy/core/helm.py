@@ -14,7 +14,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.sparse import csc_matrix
+from scipy.sparse import csc_matrix, lil_matrix
 from scipy.sparse.linalg import factorized
 
 from helmpy.core.classes import RunVariables, CaseData
@@ -40,34 +40,37 @@ def modif_Ytrans(DSB_model_method, pv_bus_model, case, run):
     K = run.K
 
     # Declare new variables
-    Ytrans_mod = np.zeros((run.length,run.length), dtype=float)
+    # Built sparse (LIL for cheap element assignment): the dense (2N+1)^2 array
+    # needed O(N^2) memory (~264 MB at 2869 buses) plus a full scan to convert
+    # to CSC, and put an effective ceiling on the solvable grid size.
+    Ytrans_mod = lil_matrix((run.length, run.length), dtype=np.float64)
     Y_Vsp_PV =[]
 
     for i in range(N):
         if Buses_type[i] == 'Slack':
-            Ytrans_mod[2*i][2*i] = 1
-            Ytrans_mod[2*i + 1][2*i + 1] = 1
+            Ytrans_mod[2*i, 2*i] = 1
+            Ytrans_mod[2*i + 1, 2*i + 1] = 1
         elif Buses_type[i] == 'PQ' or pv_bus_model == 1:
             for j in branches_buses[i]:
-                Ytrans_mod[2*i][2*j] = Ytrans[i][j].real
-                Ytrans_mod[2*i][2*j + 1] = Ytrans[i][j].imag*-1
-                Ytrans_mod[2*i + 1][2*j] = Ytrans[i][j].imag
-                Ytrans_mod[2*i + 1][2*j + 1] = Ytrans[i][j].real
+                Ytrans_mod[2*i, 2*j] = Ytrans[i][j].real
+                Ytrans_mod[2*i, 2*j + 1] = Ytrans[i][j].imag*-1
+                Ytrans_mod[2*i + 1, 2*j] = Ytrans[i][j].imag
+                Ytrans_mod[2*i + 1, 2*j + 1] = Ytrans[i][j].real
         else: # pv_bus_model == 2:
-            Ytrans_mod[2*i + 1][2*i] = 1
+            Ytrans_mod[2*i + 1, 2*i] = 1
             for j in branches_buses[i]:
-                Ytrans_mod[2*i][2*j] = Ytrans[i][j].real
-                Ytrans_mod[2*i][2*j + 1] = Ytrans[i][j].imag*-1
+                Ytrans_mod[2*i, 2*j] = Ytrans[i][j].real
+                Ytrans_mod[2*i, 2*j + 1] = Ytrans[i][j].imag*-1
 
     if DSB_model_method is not None:
         # Last row
         for j in branches_buses[slack]:
-            Ytrans_mod[2*N][2*j] = Ytrans[slack][j].real
-            Ytrans_mod[2*N][2*j + 1] = Ytrans[slack][j].imag*-1
+            Ytrans_mod[2*N, 2*j] = Ytrans[slack][j].real
+            Ytrans_mod[2*N, 2*j + 1] = Ytrans[slack][j].imag*-1
         # Last column
         for i in run.list_gen:
-            Ytrans_mod[i*2][2*N] = -K[i]
-        Ytrans_mod[2*N][2*N] = -K[slack]
+            Ytrans_mod[i*2, 2*N] = -K[i]
+        Ytrans_mod[2*N, 2*N] = -K[slack]
 
     if pv_bus_model == 1:
         if DSB_model_method is None:
@@ -75,13 +78,13 @@ def modif_Ytrans(DSB_model_method, pv_bus_model, case, run):
                 array = np.zeros( 2*len(branches_buses[i]), dtype=np.float64)
                 pos = 0
                 for k in branches_buses[i]:
-                    array[pos] = Ytrans_mod[2*k][2*i]
-                    array[pos+1] = Ytrans_mod[2*k+1][2*i]
-                    Ytrans_mod[2*k][2*i] = 0
-                    Ytrans_mod[2*k+1][2*i] = 0
+                    array[pos] = Ytrans_mod[2*k, 2*i]
+                    array[pos+1] = Ytrans_mod[2*k+1, 2*i]
+                    Ytrans_mod[2*k, 2*i] = 0
+                    Ytrans_mod[2*k+1, 2*i] = 0
                     pos += 2
                 Y_Vsp_PV.append([i, array.copy()])
-                Ytrans_mod[2*i + 1][2*i] = 1
+                Ytrans_mod[2*i + 1, 2*i] = 1
         else:
             for i in run.list_gen:
                 if slack in branches_buses[i]:
@@ -90,18 +93,18 @@ def modif_Ytrans(DSB_model_method, pv_bus_model, case, run):
                     array = np.zeros( 2*len(branches_buses[i]), dtype=np.float64)
                 pos = 0
                 for k in branches_buses[i]:
-                    array[pos] = Ytrans_mod[2*k][2*i]
-                    array[pos+1] = Ytrans_mod[2*k+1][2*i]
-                    Ytrans_mod[2*k][2*i] = 0
-                    Ytrans_mod[2*k+1][2*i] = 0
+                    array[pos] = Ytrans_mod[2*k, 2*i]
+                    array[pos+1] = Ytrans_mod[2*k+1, 2*i]
+                    Ytrans_mod[2*k, 2*i] = 0
+                    Ytrans_mod[2*k+1, 2*i] = 0
                     pos += 2
                 if slack in branches_buses[i]:
-                    array[pos] = Ytrans_mod[2*N][2*i]
-                    Ytrans_mod[2*N][2*i] = 0
+                    array[pos] = Ytrans_mod[2*N, 2*i]
+                    Ytrans_mod[2*N, 2*i] = 0
                 Y_Vsp_PV.append([i, array.copy()])
-                Ytrans_mod[2*i + 1][2*i] = 1
+                Ytrans_mod[2*i + 1, 2*i] = 1
         run.Y_Vsp_PV = Y_Vsp_PV
-    
+
     # Return a function for solving a sparse linear system, with Ytrans_mod pre-factorized.
     solve = factorized(csc_matrix(Ytrans_mod))
     run.solve = solve
@@ -524,9 +527,15 @@ def K_slack_1(case, run):
 
 def computing_voltages_mismatch(
     detailed_run_print, mismatch, max_coef, enforce_Q_limits,
-    pv_bus_model, DSB_model_method, case, run
+    pv_bus_model, DSB_model_method, case, run, start_coef=0
 ):
-    """Loop of coefficients computing until the mismatch is reached"""
+    """Loop of coefficients computing until the mismatch is reached.
+
+    start_coef > 0 resumes a converged series: coefficients 0..start_coef are
+    still valid in the run arrays (only allowed when bus types and therefore
+    the matrix did not change) and computation continues from there. Used for
+    the final full-accuracy pass after the coarse Q-limit phase.
+    """
     # Assign local variables for faster access
     slack = case.slack
     branches_buses = case.branches_buses
@@ -543,14 +552,39 @@ def computing_voltages_mismatch(
     V_complex = run.V_complex
     
     # Variables initialization
-    coef_actual = 0
-    series_large = 1
-    run.W[:,0] = 1 # Assign 1 to the inverse voltages of coefficients 0
+    coef_actual = start_coef
+    series_large = start_coef + 1
+    # Convergence-check schedule: first check at 5 coefficients, then every 2;
+    # after two failed checks every 4. Each check Pade-evaluates many buses,
+    # which costs far more than computing two additional coefficients.
+    # When resuming, the first check happens at the next odd series length
+    # (Pade uses diagonal approximants, which need an odd number of terms).
+    if start_coef == 0:
+        next_check = 5
+    else:
+        next_check = series_large + (2 if series_large % 2 == 1 else 1)
+    checks_failed = 0
+    if start_coef == 0:
+        run.W[:,0] = 1 # Assign 1 to the inverse voltages of coefficients 0
+
+    def approximant(i, largo):
+        """Value of bus i's voltage series at s=1, truncated at largo terms.
+
+        When the last coefficients have decayed to a small fraction of the
+        mismatch, the series itself has converged at s=1 and a direct sum is
+        accurate; the expensive Pade analytic continuation is only needed
+        while the tail still matters.
+        """
+        tail = abs(V_complex[i][largo-1]) + abs(V_complex[i][largo-2])
+        if tail < 1e-3 * mismatch:
+            return complex(np.sum(V_complex[i][:largo]))
+        return Pade(V_complex[i], largo)
 
     # Compute Vre_PV and V_complex for coefficient 0
-    if pv_bus_model == 1:
-        Vre_PV[:,0] = 1
-    compute_complex_voltages(0, pv_bus_model, case, run)
+    if start_coef == 0:
+        if pv_bus_model == 1:
+            Vre_PV[:,0] = 1
+        compute_complex_voltages(0, pv_bus_model, case, run)
 
     # Compute active and complex power injection
     Pi = run.Pg - case.Pd
@@ -605,12 +639,12 @@ def computing_voltages_mismatch(
         # Mismatch check
         flag_mismatch = False
         series_large += 1
-        if (series_large - 1) % 2 == 0 and series_large > 3:
+        if series_large == next_check:
             if first_check:
                 first_check = False
                 for i in range(N):
-                    magn1,rad1 = cm.polar(Pade(V_complex[i],series_large-2))
-                    V_complex_profile[i] = Pade(V_complex[i],series_large)
+                    magn1,rad1 = cm.polar(approximant(i, series_large-2))
+                    V_complex_profile[i] = approximant(i, series_large)
                     magn2, rad2 = cm.polar(V_complex_profile[i])
                     if((abs(magn1-magn2)>mismatch) or (abs(rad1-rad2)>mismatch)):
                         flag_mismatch = True
@@ -620,7 +654,7 @@ def computing_voltages_mismatch(
                 continue_check = True
                 for i in range(pade_til):
                     magn1,rad1 = cm.polar(V_complex_profile[i])
-                    V_complex_profile[i] = Pade(V_complex[i],series_large)
+                    V_complex_profile[i] = approximant(i, series_large)
                     magn2, rad2 = cm.polar(V_complex_profile[i])
                     if((abs(magn1-magn2)>mismatch) or (abs(rad1-rad2)>mismatch)):
                         flag_mismatch = True
@@ -629,13 +663,16 @@ def computing_voltages_mismatch(
                         break
                 if continue_check:
                     for i in range(pade_til,N):
-                        magn1,rad1 = cm.polar(Pade(V_complex[i],series_large-2))
-                        V_complex_profile[i] = Pade(V_complex[i],series_large)
+                        magn1,rad1 = cm.polar(approximant(i, series_large-2))
+                        V_complex_profile[i] = approximant(i, series_large)
                         magn2, rad2 = cm.polar(V_complex_profile[i])
                         if((abs(magn1-magn2)>mismatch) or (abs(rad1-rad2)>mismatch)):
                             flag_mismatch = True
                             pade_til = i+1
                             break
+            if flag_mismatch:
+                checks_failed += 1
+                next_check = series_large + (2 if checks_failed < 2 else 4)
             if not flag_mismatch:
                 # Qgen check or ignore limits
                 if enforce_Q_limits:
@@ -923,32 +960,57 @@ def helm(case, detailed_run_print=False, mismatch=1e-4, scale=1, max_coefficient
     # bus). When given, they override the default generation-proportional K factors.
     run.external_K = K_factors
 
+    # Two-phase Q-limit enforcement: PVLIM->PQ switching decisions only need a
+    # coarse solution, so while bus types are still settling the series is only
+    # converged to q_switch_mismatch. One final pass then runs at the requested
+    # mismatch. (Previously every switch restarted a full-accuracy run; on
+    # case2869pegase that meant 4 complete 1e-8 computations.)
+    q_switch_mismatch = max(mismatch, 1e-4)
+    current_mismatch = q_switch_mismatch if enforce_Q_limits else mismatch
+    structure_changed = True
+    resume_from = 0
+
     while True:
-        # Re-construct list_gen. List of generators (PV buses)
-        run.list_gen = np.setdiff1d(run.list_gen, run.list_gen_remove, assume_unique=True)
+        # The matrix and bus-type dependent setup only has to be redone after a
+        # PVLIM->PQ switch, not for the final full-accuracy pass.
+        if structure_changed:
+            # Re-construct list_gen. List of generators (PV buses)
+            run.list_gen = np.setdiff1d(run.list_gen, run.list_gen_remove, assume_unique=True)
 
-        # Define K factors
-        if DSB_model:
-            # Computing the K factor for each PV bus and the slack bus.
-            compute_k_factor(case, run)
-        elif DSB_model_method is not None:
-            # Set the slack's participation factor to 1 and the rest to 0. Classic slack bus model.
-            K_slack_1(case, run)
+            # Define K factors
+            if DSB_model:
+                # Computing the K factor for each PV bus and the slack bus.
+                compute_k_factor(case, run)
+            elif DSB_model_method is not None:
+                # Set the slack's participation factor to 1 and the rest to 0. Classic slack bus model.
+                K_slack_1(case, run)
 
-        # Create modified Y matrix and list that contains the respective column to its voltage on PV and PVLIM buses 
-        modif_Ytrans(DSB_model_method, pv_bus_model, case, run)
+            # Create modified Y matrix and list that contains the respective column to its voltage on PV and PVLIM buses
+            modif_Ytrans(DSB_model_method, pv_bus_model, case, run)
 
-        # Arrays and lists creation
-        Unknowns_soluc(DSB_model_method, pv_bus_model, case.N, run)
+            # Arrays and lists creation
+            Unknowns_soluc(DSB_model_method, pv_bus_model, case.N, run)
+            structure_changed = False
 
         # Loop of coefficients computing until the mismatch is reached
-        flag_recalculate, flag_divergence, series_large = computing_voltages_mismatch(detailed_run_print, mismatch,
+        flag_recalculate, flag_divergence, series_large = computing_voltages_mismatch(detailed_run_print,
+                                                                                      current_mismatch,
                                                                                       max_coef, enforce_Q_limits,
                                                                                       pv_bus_model, DSB_model_method,
-                                                                                      case, run)
+                                                                                      case, run,
+                                                                                      start_coef=resume_from)
 
-        if not flag_recalculate:
+        if flag_recalculate:
+            # A PVLIM bus switched to PQ; rebuild and stay at the coarse tolerance.
+            structure_changed = True
+            resume_from = 0
+            continue
+        if flag_divergence or current_mismatch <= mismatch:
             break
+        # Bus types are settled; the final pass at the requested accuracy
+        # extends the already-computed series instead of restarting it.
+        current_mismatch = mismatch
+        resume_from = series_large - 1
     # reset scale case
     if scale != 1:
         case.reset_scale()
