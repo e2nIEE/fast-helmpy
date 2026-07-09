@@ -2,6 +2,8 @@ name: tests
 
 on:
   push:
+    branches:
+      - '**'        # branch pushes only; tag pushes are handled by release.yml
   pull_request:
 
 jobs:

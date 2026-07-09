@@ -1,0 +1,99 @@
+# Runs the test suite and, when a version tag (vX.Y.Z) is pushed, builds the
+# package and publishes it to PyPI (or TestPyPI on manual dispatch).
+#
+# Publishing uses PyPI Trusted Publishing (OIDC) - no API token is stored as a
+# secret. Configure the trusted publisher once on PyPI/TestPyPI:
+#   PyPI project "fast-helmpy" -> Publishing -> add a GitHub publisher with
+#     owner: e2nIEE, repository: fast-helmpy, workflow: release.yml,
+#     environment: pypi (resp. testpypi).
+# Until the project exists on PyPI, do the very first upload from a manual
+# workflow_dispatch run targeting testpypi, or create the project via a
+# pending publisher.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'          # e.g. v0.3.0 -> release to PyPI
+  workflow_dispatch:  # manual run, choose the target index (defaults to TestPyPI)
+    inputs:
+      upload_server:
+        description: 'package index to upload to'
+        required: true
+        default: 'testpypi'
+        type: choice
+        options:
+          - 'testpypi'
+          - 'pypi'
+
+permissions:
+  contents: read
+
+jobs:
+
+  # 1. Run the full test suite across the supported OS/Python matrix.
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package with test extras
+        run: pip install -e .[test]
+      - name: Run test suite
+        run: pytest -q
+
+  # 2. Build the sdist + wheel once (Python is pure, so one build is enough).
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # 3. Publish to PyPI. Runs only after the tests and build succeed, and only
+  #    for a version tag (release to PyPI) or a manual dispatch (chosen index).
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # PyPI for tag pushes; the chosen index for a manual run.
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.upload_server) || 'pypi' }}
+    permissions:
+      id-token: write   # required for Trusted Publishing (OIDC)
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_server == 'testpypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+
+      - name: Publish to PyPI
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_server == 'pypi') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
