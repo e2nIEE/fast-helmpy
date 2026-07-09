@@ -302,11 +302,11 @@ def evaluate_rhs(n, Si, Pi, pv_bus_model, DSB_model_method, case, run):
         else:
             CC = -S1[slack].real
             if case.conduc_buses[slack]:
-                # Faithful to the original slack formula, whose shunt
-                # convolution pairs orders summing to n (the PV-bus rows pair
-                # orders summing to n-1); kept as-is for regression fidelity.
-                slack_VV = VV[slack] - (V[slack, n-1] * np.conj(V[slack, 1])).real
-                CC = CC - Yshunt[slack].real * (slack_VV + 2*Vn1[slack].real)
+                # Shunt convolution pairs orders summing to n-1, like the
+                # PV-bus rows. The original HELMpy paired orders summing to n
+                # here (off-by-one); see KNOWN_ISSUES.md issue 1 for the
+                # derivation and the conductive-slack regression test.
+                CC = CC - Yshunt[slack].real * (run.VV_prev[slack] + 2*Vn1[slack].real)
             if Fconv is not None:
                 CC = CC - Fconv[slack].real
         Soluc_eval[2*N, n] = CC
@@ -549,8 +549,15 @@ def computing_voltages_mismatch(
     while True:
         coef_actual += 1
         if coef_actual == 40:
-            # Expand the coeffcients arrays to the maximum. They were originally set to 40
+            # Expand the coefficient arrays to the maximum. They were originally set to 40
             run.expand_coef_arrays()
+            # Re-bind the local aliases: expansion replaces the arrays on run,
+            # and the stale 40-column references would otherwise crash (or
+            # silently truncate) any case needing more than 40 coefficients.
+            Soluc_eval = run.Soluc_eval
+            coefficients = run.coefficients
+            V_complex = run.V_complex
+            Vre_PV = run.Vre_PV
         if detailed_run_print:
             logger.debug("Computing coefficient: %d", coef_actual)
 

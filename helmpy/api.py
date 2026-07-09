@@ -180,7 +180,10 @@ def solve_helm(Ybus, Sbus, bus_types, V_specified, Qmin=None, Qmax=None,
         else (2 if distributed_slack else None)
     Pi = run.Pg - case.Pd
     Si = Pi + run.Qg * 1j - case.Qd * 1j
-    Ploss = Pade(run.coefficients[2 * case.N], n_coefficients) \
+    # Diagonal Pade needs an odd series length; a diverged run stops at an
+    # even one (max_coefficients), so truncate by one term there.
+    largo = n_coefficients if n_coefficients % 2 == 1 else n_coefficients - 1
+    Ploss = Pade(run.coefficients[2 * case.N], largo) \
         if effective_method is not None else 0.0
     residual = float(power_residual(V, Ploss, Si, Pi, effective_method,
                                     case, run))

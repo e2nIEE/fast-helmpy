@@ -103,6 +103,60 @@ def test_solve_helm_input_validation():
         helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified, convergence="bogus")
 
 
+def test_ds_m2_conductive_slack_matches_m1():
+    """Regression for KNOWN_ISSUES issue 1: the DS-M2 slack-row shunt
+    convolution paired the wrong coefficient orders. The bug only manifests
+    with shunt conductance at the slack bus and a setpoint != 1.0 p.u.
+    DS-M1 formulates the same physics independently, so both methods must
+    produce the same solution."""
+    bundle = get_case_bundle("case9")
+    case = bundle.case
+    Ybus, Sbus, bus_types, V_specified, Qmin, Qmax = arrays_from_case(case)
+    Ybus = Ybus.tolil()
+    Ybus[case.slack, case.slack] += 0.5  # shunt conductance at the slack bus
+    Ybus = csr_matrix(Ybus)
+    V_specified = V_specified.copy()
+    V_specified[case.slack] = 1.05  # (V_sp - 1)^2 term must be nonzero
+
+    V = {}
+    for method in (1, 2):
+        result = helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
+                                   Qmin=Qmin, Qmax=Qmax, mismatch=1e-8,
+                                   distributed_slack=True,
+                                   dsb_model_method=method)
+        assert result.converged
+        assert result.residual <= 1e-8
+        V[method] = result.V
+    np.testing.assert_allclose(V[2], V[1], rtol=0, atol=1e-9)
+
+
+def test_more_than_40_coefficients():
+    """Regression for KNOWN_ISSUES issue 2: expand_coef_arrays() replaces the
+    coefficient arrays at order 40, but stale local references crashed any
+    run needing more. Heavily loaded case9 (2.4x) needs ~95 coefficients."""
+    bundle = get_case_bundle("case9")
+    Ybus, Sbus, bus_types, V_specified, _, _ = arrays_from_case(bundle.case)
+
+    result = helmpy.solve_helm(Ybus, 2.4 * Sbus, bus_types, V_specified,
+                               mismatch=1e-8, max_coefficients=200)
+    assert result.converged
+    assert result.n_coefficients > 40
+    assert result.residual <= 1e-8
+
+
+def test_divergence_reported_beyond_collapse():
+    """Loading far past the nose point must be reported as non-converged
+    (and not crash in the diverged-run post-processing)."""
+    bundle = get_case_bundle("case9")
+    Ybus, Sbus, bus_types, V_specified, _, _ = arrays_from_case(bundle.case)
+
+    result = helmpy.solve_helm(Ybus, 3.0 * Sbus, bus_types, V_specified,
+                               mismatch=1e-8, max_coefficients=100,
+                               distributed_slack=True)
+    assert not result.converged
+    assert result.residual > 1e-8
+
+
 def test_import_without_pandas():
     """Importing helmpy and solving from arrays must not require pandas."""
     import subprocess
