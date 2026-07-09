@@ -219,6 +219,12 @@ only numpy+scipy; a pandapower net can be solved end-to-end via a ~20-line adapt
 
 ## Phase 5 — Hybrid mode: HELM start + Newton polish (~1–2 days, opt-in)
 
+> **Status: design documented (2026-07-09), implementation deferred.** See
+> `HYBRID_MODE_DESIGN.md`: Mode A (external polish — caller's NR from a
+> `mismatch=1e-3` HELM start, everything needed exists since Phase 4) and
+> Mode B (internal compact array-based NR), including handoff tolerance,
+> frozen-bus-type policy, DS handling and the validation plan.
+
 For the pandapower fallback use case (`LoadflowNotConverged`), the fastest robust
 combination is: HELM to loose tolerance → NR to tight tolerance.
 
