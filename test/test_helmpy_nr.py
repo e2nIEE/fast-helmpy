@@ -7,7 +7,7 @@ from os.path import basename
 import numpy as np
 import pandas as pd
 
-from paths import helmpy, HELMPY_PATH
+from paths import fast_helmpy, HELMPY_PATH
 
 
 
@@ -21,7 +21,7 @@ class CaseDataAndResults:
         #  Name
         self.name = basename(grid_data_file_path[0:-5])
         # case object
-        self.case = helmpy.create_case_data_object_from_xlsx(grid_data_file_path)
+        self.case = fast_helmpy.create_case_data_object_from_xlsx(grid_data_file_path)
         self.grid_data_file_path = grid_data_file_path
         # Classic slack
         case_data = pd.read_excel(results_classic_slack_file_path, sheet_name="Buses")
@@ -74,11 +74,11 @@ def run_helmpy_nr_functions(detailed_print, cases_to_test, methods):
                 
             # Execute function
             if DSB_model:
-                complex_voltage = helmpy.nr_ds(
+                complex_voltage = fast_helmpy.nr_ds(
                     case.grid_data_file_path, Mismatch=1e-8, Scale=scale, # detailed_run_print=True,
                     DSB_model=aply_DSB_model)
             else:
-                complex_voltage = helmpy.nr(
+                complex_voltage = fast_helmpy.nr(
                     case.grid_data_file_path, Mismatch=1e-8, Scale=scale)
 
             # Errors

@@ -1,5 +1,5 @@
 """
-Tests for the array-based library API (helmpy.api.solve_helm).
+Tests for the array-based library API (fast_helmpy.api.solve_helm).
 
 The arrays are derived from the xlsx cases' full Ybus, so the pegase cases
 also exercise the internal Ybus decomposition with asymmetric entries
@@ -11,7 +11,7 @@ import pytest
 from scipy.sparse import csr_matrix
 
 from conftest import get_case_bundle, HELMPY_PATH
-import helmpy
+import fast_helmpy
 
 # Same reasoning as in test_helmpy.py: agreement with the references is
 # bounded by the convergence tolerance. The array path additionally uses a
@@ -51,7 +51,7 @@ def test_solve_helm_matches_reference(case_name):
     bundle = get_case_bundle(case_name)
     Ybus, Sbus, bus_types, V_specified, Qmin, Qmax = arrays_from_case(bundle.case)
 
-    result = helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
+    result = fast_helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
                                Qmin=Qmin, Qmax=Qmax, mismatch=1e-8)
 
     assert result.converged
@@ -70,7 +70,7 @@ def test_solve_helm_distributed_slack_self_consistent():
     bundle = get_case_bundle("case118")
     Ybus, Sbus, bus_types, V_specified, Qmin, Qmax = arrays_from_case(bundle.case)
 
-    result = helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
+    result = fast_helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
                                Qmin=Qmin, Qmax=Qmax, mismatch=1e-8,
                                distributed_slack=True)
     assert result.converged
@@ -81,8 +81,8 @@ def test_solve_helm_slack_angle_rotation():
     bundle = get_case_bundle("case9")
     Ybus, Sbus, bus_types, V_specified, Qmin, Qmax = arrays_from_case(bundle.case)
 
-    base = helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified)
-    rotated = helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
+    base = fast_helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified)
+    rotated = fast_helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
                                 slack_angle_degrees=30.0)
     np.testing.assert_allclose(
         rotated.V, base.V * np.exp(1j * np.deg2rad(30.0)), rtol=0, atol=1e-12)
@@ -96,11 +96,11 @@ def test_solve_helm_input_validation():
     Ybus, Sbus, bus_types, V_specified, _, _ = arrays_from_case(bundle.case)
 
     with pytest.raises(ValueError, match="exactly one slack"):
-        helmpy.solve_helm(Ybus, Sbus, np.ones(len(Sbus), dtype=int), V_specified)
+        fast_helmpy.solve_helm(Ybus, Sbus, np.ones(len(Sbus), dtype=int), V_specified)
     with pytest.raises(ValueError, match="shape"):
-        helmpy.solve_helm(Ybus, Sbus[:-1], bus_types, V_specified)
+        fast_helmpy.solve_helm(Ybus, Sbus[:-1], bus_types, V_specified)
     with pytest.raises(ValueError, match="convergence"):
-        helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified, convergence="bogus")
+        fast_helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified, convergence="bogus")
 
 
 def test_ds_m2_conductive_slack_matches_m1():
@@ -120,7 +120,7 @@ def test_ds_m2_conductive_slack_matches_m1():
 
     V = {}
     for method in (1, 2):
-        result = helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
+        result = fast_helmpy.solve_helm(Ybus, Sbus, bus_types, V_specified,
                                    Qmin=Qmin, Qmax=Qmax, mismatch=1e-8,
                                    distributed_slack=True,
                                    dsb_model_method=method)
@@ -137,7 +137,7 @@ def test_more_than_40_coefficients():
     bundle = get_case_bundle("case9")
     Ybus, Sbus, bus_types, V_specified, _, _ = arrays_from_case(bundle.case)
 
-    result = helmpy.solve_helm(Ybus, 2.4 * Sbus, bus_types, V_specified,
+    result = fast_helmpy.solve_helm(Ybus, 2.4 * Sbus, bus_types, V_specified,
                                mismatch=1e-8, max_coefficients=200)
     assert result.converged
     assert result.n_coefficients > 40
@@ -150,7 +150,7 @@ def test_divergence_reported_beyond_collapse():
     bundle = get_case_bundle("case9")
     Ybus, Sbus, bus_types, V_specified, _, _ = arrays_from_case(bundle.case)
 
-    result = helmpy.solve_helm(Ybus, 3.0 * Sbus, bus_types, V_specified,
+    result = fast_helmpy.solve_helm(Ybus, 3.0 * Sbus, bus_types, V_specified,
                                mismatch=1e-8, max_coefficients=100,
                                distributed_slack=True)
     assert not result.converged
@@ -165,10 +165,10 @@ def test_import_without_pandas():
         "import sys\n"
         "sys.modules['pandas'] = None\n"  # poison: any 'import pandas' fails
         f"sys.path.insert(0, r'{HELMPY_PATH}')\n"
-        "import helmpy\n"
+        "import fast_helmpy\n"
         "import numpy as np\n"
         "Y = np.array([[1/0.1j + 1, -1/0.1j], [-1/0.1j, 1/0.1j]])\n"
-        "r = helmpy.solve_helm(Y, np.array([0, -0.5 - 0.2j]),\n"
+        "r = fast_helmpy.solve_helm(Y, np.array([0, -0.5 - 0.2j]),\n"
         "                      np.array([3, 1]), np.array([1.0, 1.0]))\n"
         "assert r.converged and r.residual < 1e-8\n"
         "print('OK')\n"

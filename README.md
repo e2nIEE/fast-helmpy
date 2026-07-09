@@ -1,26 +1,30 @@
-# HELMpy
+# fast-helmpy
 
-HELMpy is an open source package of power flow solvers.
+fast-helmpy is an open source package of power flow solvers.
 
-This package contains the Holomorphic Embedding Load flow Method (HELM) and
-the Newton-Raphson (NR) algorithm.
-The intention of HELMpy is to support research, especially on the HELM,
-and to contribute with the development of open source code
-related to this subject.
-The developed code is properly commented and organized
-so it would be easy to understand and modify.
+This package contains a **vectorized, ~16× faster** implementation of the
+Holomorphic Embedding Load flow Method (HELM) and the Newton-Raphson (NR)
+algorithm. It is a fork of [HELMpy](https://github.com/HELMpy/HELMpy)
+(via [vogt31337/HELMpy](https://github.com/vogt31337/HELMpy)); the solver
+core was rewritten for speed (sparse/`einsum` recurrence, batched Padé,
+physical residual convergence check) and exposed as an array-based library
+API. See `BENCHMARKS.md` for the measured speedups and `IMPROVEMENT_PLAN.md`
+for the optimization history.
+
+The import package is `fast_helmpy` (underscore); the distribution on PyPI is
+`fast-helmpy` (hyphen).
 
 ## Installation
 
 ```
-pip install git+https://github.com/vogt31337/HELMpy.git
+pip install git+https://github.com/e2nIEE/fast-helmpy.git
 ```
 
 The core solver needs only `numpy` and `scipy`. Loading grids from `.xlsx`
 files and the Newton-Raphson solvers additionally need `pandas`/`openpyxl`:
-`pip install helmpy[xlsx]`.
+`pip install fast-helmpy[xlsx]`.
 
-## Using HELMpy as a library
+## Using fast-helmpy as a library
 
 `solve_helm` solves a power flow directly from per-unit arrays — no files
 involved. Bus types follow the ppc/pypower convention (1 = PQ, 2 = PV,
@@ -28,7 +32,7 @@ involved. Bus types follow the ppc/pypower convention (1 = PQ, 2 = PV,
 
 ```python
 import numpy as np
-from helmpy import solve_helm
+from fast_helmpy import solve_helm
 
 result = solve_helm(
     Ybus,          # (N, N) bus admittance matrix, dense or scipy.sparse
@@ -50,7 +54,7 @@ exist after any `runpp` attempt (or via `pandapower.pd2ppc`):
 ```python
 import numpy as np
 import pandapower as pp
-from helmpy import solve_helm
+from fast_helmpy import solve_helm
 
 net = ...                     # your pandapower net
 try:
@@ -67,15 +71,15 @@ except pp.LoadflowNotConverged:
     # result.V is a robust start vector: pp.runpp(net, init_vm_pu=..., init_va_degree=...)
 ```
 
-Solver progress is reported through the `helmpy` `logging` logger (no prints
-in library mode). Since HELMpy is used as a separate library here, its AGPL
-license does not affect the license of the calling code base.
+Solver progress is reported through the `fast_helmpy` `logging` logger (no
+prints in library mode). Since fast-helmpy is used as a separate library
+here, its AGPL license does not affect the license of the calling code base.
 
 ## Repository structure
 
 - data: sample data of large-sized, complex practical grids for testing purposes. Already computed results can also be found
 - helmm: matlab files for downloading and parsing to `.xlsx` matpower grids
-- helmpy: scripts with core functionality
+- fast_helmpy: scripts with core functionality
 - test: pytest regression suite (`pytest -m "not slow"` for the fast gate)
 - benchmark: wall-clock benchmark harness (see `BENCHMARKS.md`)
 

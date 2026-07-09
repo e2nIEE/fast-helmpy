@@ -25,7 +25,7 @@ sys.path.insert(0, str(HELMPY_PATH))
 import numpy as np
 import scipy
 
-import helmpy
+import fast_helmpy
 
 ALL_CASES = ["case9", "case118", "case1354pegase", "case2869pegase"]
 
@@ -53,7 +53,7 @@ def benchmark(case_names, method_names, mismatch, repeat, enforce_q_limits):
     print("|---|---|---|---|---|")
 
     for case_name in case_names:
-        case = helmpy.create_case_data_object_from_xlsx(
+        case = fast_helmpy.create_case_data_object_from_xlsx(
             str(HELMPY_PATH / "data" / "cases" / f"{case_name}.xlsx")
         )
         for method_name in method_names:
@@ -63,7 +63,7 @@ def benchmark(case_names, method_names, mismatch, repeat, enforce_q_limits):
             for _ in range(repeat):
                 t0 = time.perf_counter()
                 with contextlib.redirect_stdout(io.StringIO()):
-                    run, n_coefficients, diverged = helmpy.helm(
+                    run, n_coefficients, diverged = fast_helmpy.helm(
                         case, mismatch=mismatch, scale=scale,
                         pv_bus_model=pv_bus_model, DSB_model=dsb_model,
                         DSB_model_method=dsb_method,

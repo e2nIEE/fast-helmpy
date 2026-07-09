@@ -16,9 +16,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.sparse import csr_matrix, diags
 
-from helmpy.core.classes import CaseData
-from helmpy.core.helm import helm, power_residual
-from helmpy.core.analytic_continuation import Pade
+from fast_helmpy.core.classes import CaseData
+from fast_helmpy.core.helm import helm, power_residual
+from fast_helmpy.core.analytic_continuation import Pade
 
 # ppc/pypower-style bus type codes
 PQ = 1

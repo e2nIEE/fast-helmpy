@@ -7,13 +7,13 @@ solvers (nr, nr_ds) additionally require pandas + openpyxl and are loaded
 lazily on first use.
 """
 
-from helmpy.core.helm import helm
-from helmpy.core.classes import CaseData, create_case_data_object_from_xlsx
-from helmpy.api import solve_helm, HelmResults, create_case_from_arrays
+from fast_helmpy.core.helm import helm
+from fast_helmpy.core.classes import CaseData, create_case_data_object_from_xlsx
+from fast_helmpy.api import solve_helm, HelmResults, create_case_from_arrays
 
 __version__ = '0.2.0'
 
-_LAZY_NR = {'nr': 'helmpy.core.nr', 'nr_ds': 'helmpy.core.nr_ds'}
+_LAZY_NR = {'nr': 'fast_helmpy.core.nr', 'nr_ds': 'fast_helmpy.core.nr_ds'}
 
 
 def __getattr__(name):
@@ -21,4 +21,4 @@ def __getattr__(name):
         import importlib
         module = importlib.import_module(_LAZY_NR[name])
         return getattr(module, name)
-    raise AttributeError(f"module 'helmpy' has no attribute {name!r}")
+    raise AttributeError(f"module 'fast_helmpy' has no attribute {name!r}")

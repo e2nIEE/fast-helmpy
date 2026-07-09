@@ -3,15 +3,18 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "helmpy"
-version = "0.2.0"
-description = "Power flow solvers including the Holomorphic Embedding Load Flow Method (HELM)"
+name = "fast-helmpy"
+version = "0.3.0"
+description = "Fast, vectorized power flow solvers including the Holomorphic Embedding Load Flow Method (HELM)"
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.9"
 authors = [
     { name = "Tulio Molina" },
     { name = "Juan José Ortega" },
+]
+maintainers = [
+    { name = "Mike Vogt" },
 ]
 keywords = ["power flow", "load flow", "HELM", "holomorphic embedding", "power systems"]
 classifiers = [
@@ -32,8 +35,9 @@ xlsx = ["pandas", "openpyxl"]
 test = ["pytest", "pandas", "openpyxl"]
 
 [project.urls]
-Homepage = "https://github.com/vogt31337/HELMpy"
+Homepage = "https://github.com/e2nIEE/fast-helmpy"
+Fork-of = "https://github.com/vogt31337/HELMpy"
 Upstream = "https://github.com/HELMpy/HELMpy"
 
 [tool.setuptools.packages.find]
-include = ["helmpy*"]
+include = ["fast_helmpy*"]

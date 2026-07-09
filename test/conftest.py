@@ -12,7 +12,7 @@ import pandas as pd
 HELMPY_PATH = Path(__file__).parents[1]
 sys.path.insert(0, str(HELMPY_PATH))
 
-import helmpy  # noqa: E402  (needs the sys.path entry above)
+import fast_helmpy  # noqa: E402  (needs the sys.path entry above)
 
 DATA_PATH = HELMPY_PATH / "data"
 
@@ -26,7 +26,7 @@ class CaseBundle:
 
     def __init__(self, name):
         self.name = name
-        self.case = helmpy.create_case_data_object_from_xlsx(
+        self.case = fast_helmpy.create_case_data_object_from_xlsx(
             str(DATA_PATH / "cases" / f"{name}.xlsx")
         )
         classic = pd.read_excel(

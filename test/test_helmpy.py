@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from conftest import get_case_bundle
-import helmpy
+import fast_helmpy
 
 # Tolerances against the stored references. Since Phase 1 the solver stops at
 # different series lengths than the run that generated the references (check
@@ -55,7 +55,7 @@ def test_helm_matches_reference(case_name, pv_bus_model, DSB_model, DSB_model_me
     bundle = get_case_bundle(case_name)
     scale = 1.02 if DSB_model else 1
 
-    run, n_coefficients, diverged = helmpy.helm(
+    run, n_coefficients, diverged = fast_helmpy.helm(
         bundle.case,
         mismatch=MISMATCH,
         scale=scale,

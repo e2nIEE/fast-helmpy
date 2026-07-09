@@ -16,8 +16,8 @@ import numpy as np
 from scipy.sparse import csc_matrix, csr_matrix
 from scipy.sparse.linalg import factorized
 
-from helmpy.core.classes import RunVariables, CaseData
-from helmpy.core.analytic_continuation import Pade, pade_batched
+from fast_helmpy.core.classes import RunVariables, CaseData
+from fast_helmpy.core.analytic_continuation import Pade, pade_batched
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ def build_case_sparse_matrices(case, run):
     Yphase_csr holds the phase-shifter admittance corrections from
     case.phase_dict, or None when the case has no phase-shifting branches.
 
-    Cases built from arrays (helmpy.api) carry precomputed sparse matrices;
+    Cases built from arrays (fast_helmpy.api) carry precomputed sparse matrices;
     those are used directly.
     """
     if case.Ytrans_csr is not None:

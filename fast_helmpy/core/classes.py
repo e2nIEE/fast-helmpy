@@ -182,7 +182,7 @@ class CaseData:
 
     dense_matrices=False skips the O(N^2) dense Ytrans/Y arrays; solving then
     requires precomputed sparse matrices on the case (see
-    helmpy.api.create_case_from_arrays), and the branch-level reporting path
+    fast_helmpy.api.create_case_from_arrays), and the branch-level reporting path
     (power_balance, save_results) is unavailable.
     """
     def __init__(self, name: str, N: np.int64, N_generators: np.int64,
@@ -223,7 +223,7 @@ class CaseData:
             self.Y = None
             self.Yre = None
             self.Yimag = None
-        # Optional precomputed sparse matrices (helmpy.api array frontend);
+        # Optional precomputed sparse matrices (fast_helmpy.api array frontend);
         # helm.build_case_sparse_matrices uses them when present.
         self.Ytrans_csr = None
         self.Yphase_csr = None
