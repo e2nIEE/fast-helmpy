@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fast-helmpy"
-version = "0.3.0"
+version = "0.4.0"
 description = "Fast, vectorized power flow solvers including the Holomorphic Embedding Load Flow Method (HELM)"
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
